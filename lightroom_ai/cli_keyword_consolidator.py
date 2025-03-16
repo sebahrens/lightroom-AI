@@ -23,12 +23,14 @@ def parse_args():
     parser.add_argument("catalog_path", help="Path to the Lightroom catalog file (.lrcat)")
     parser.add_argument("-c", "--config", default="config.json", help="Path to configuration file")
     parser.add_argument("-m", "--model", help="Override AI model specified in config")
+    parser.add_argument("-w", "--workers", type=int, help="Override number of worker threads")
     parser.add_argument("--dry-run", action="store_true", help="Analyze keywords but don't update catalog")
     parser.add_argument("--output", help="Path to save analysis results as JSON")
     parser.add_argument("--log-file", help="Path to log file")
     parser.add_argument("--log-level", choices=["DEBUG", "INFO", "WARNING", "ERROR"], default="INFO", 
                         help="Logging level")
     parser.add_argument("--drop-all", action="store_true", help="Drop all existing keywords before adding new ones")
+    parser.add_argument("--similarity", type=float, help="Set similarity threshold for keyword grouping (0.0-1.0)")
     
     return parser.parse_args()
 
@@ -55,6 +57,26 @@ def main():
         config.log_level = args.log_level
         config.keyword_consolidation = True
         
+        # Override model if specified
+        if args.model:
+            logger.info(f"Overriding model with: {args.model}")
+            if hasattr(config, 'claude_config') and config.provider == "claude":
+                config.claude_config.model = args.model
+            elif hasattr(config, 'openrouter_config') and config.provider == "openrouter":
+                config.openrouter_config.model = args.model
+            elif hasattr(config, 'ollama_config') and config.provider == "ollama":
+                config.ollama_config.model = args.model
+        
+        # Override number of workers if specified
+        if args.workers is not None:
+            logger.info(f"Overriding max_workers with: {args.workers}")
+            config.max_workers = args.workers
+            
+        # Override similarity threshold if specified
+        if args.similarity is not None:
+            logger.info(f"Setting keyword similarity threshold to: {args.similarity}")
+            config.keyword_similarity_threshold = args.similarity
+        
     except Exception as e:
         print(f"Error loading configuration: {e}")
         return 1
@@ -65,6 +87,8 @@ def main():
     logger.info(f"Starting keyword consolidation for catalog: {args.catalog_path}")
     if args.model:
         logger.info(f"Using model override: {args.model}")
+    if args.workers is not None:
+        logger.info(f"Using worker override: {args.workers}")
     
     try:
         # Create keyword consolidator
