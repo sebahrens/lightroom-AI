@@ -4,6 +4,7 @@ Configuration handling for the Lightroom AI script.
 
 import json
 import os
+import re
 from dataclasses import dataclass, field, asdict
 from typing import Optional, List, Dict, Any, Union
 
@@ -77,6 +78,62 @@ class AppConfig:
     purge_unused_keywords: bool = False  # Whether to purge unused keywords after harmonization
 
 
+def _substitute_env_vars(value: Any) -> Any:
+    """
+    Substitute environment variables in string values.
+    
+    Args:
+        value: Value to process for environment variables
+        
+    Returns:
+        Value with environment variables substituted
+    """
+    if not isinstance(value, str):
+        return value
+        
+    # Pattern to match ${ENV_VAR} syntax
+    pattern = r'\${([^}]+)}'
+    
+    def replace_env_var(match):
+        env_var = match.group(1)
+        env_value = os.environ.get(env_var)
+        if env_value is None:
+            print(f"Warning: Environment variable {env_var} not found")
+            return ""
+        return env_value
+    
+    return re.sub(pattern, replace_env_var, value)
+
+
+def _process_config_dict(config_dict: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Process a configuration dictionary to substitute environment variables.
+    
+    Args:
+        config_dict: Dictionary containing configuration values
+        
+    Returns:
+        Processed dictionary with environment variables substituted
+    """
+    result = {}
+    
+    for key, value in config_dict.items():
+        if isinstance(value, dict):
+            # Recursively process nested dictionaries
+            result[key] = _process_config_dict(value)
+        elif isinstance(value, list):
+            # Process lists
+            result[key] = [
+                _process_config_dict(item) if isinstance(item, dict) else _substitute_env_vars(item)
+                for item in value
+            ]
+        else:
+            # Process scalar values
+            result[key] = _substitute_env_vars(value)
+    
+    return result
+
+
 def load_config(config_path: str) -> AppConfig:
     """
     Load and validate configuration from JSON file.
@@ -91,12 +148,15 @@ def load_config(config_path: str) -> AppConfig:
         ValueError: If the configuration is invalid
         RuntimeError: If the configuration file cannot be loaded
     """
-        # Resolve the config path
+    # Resolve the config path
     config_path = os.path.abspath(os.path.expanduser(config_path))
     
     try:
         with open(config_path, 'r') as cfg:
             config_dict = json.load(cfg)
+        
+        # Process environment variables in the config
+        config_dict = _process_config_dict(config_dict)
         
         # Validate provider
         if 'provider' not in config_dict:
@@ -111,7 +171,7 @@ def load_config(config_path: str) -> AppConfig:
                 raise ValueError("Missing Claude API key in configuration")
             
             provider_config = ClaudeConfig(
-                api_key=os.environ.get("CLAUDE_API_KEY", config_dict.pop('claude_api_key', '')),
+                api_key=config_dict.pop('claude_api_key', ''),
                 api_url=config_dict.pop('claude_api_url', "https://api.anthropic.com/v1/messages"),
                 model=config_dict.pop('claude_model', "claude-v1"),
                 use_batch_api=config_dict.pop('use_batch_api', False)
@@ -129,7 +189,7 @@ def load_config(config_path: str) -> AppConfig:
                 raise ValueError("Missing OpenRouter API key in configuration")
                 
             provider_config = OpenRouterConfig(
-                api_key=os.environ.get("OPENROUTER_API_KEY", config_dict.pop('openrouter_api_key', '')),
+                api_key=config_dict.pop('openrouter_api_key', ''),
                 api_url=config_dict.pop('openrouter_api_url', "https://openrouter.ai/api/v1/chat/completions"),
                 model=config_dict.pop('openrouter_model', "anthropic/claude-3-opus"),
                 site_url=config_dict.pop('openrouter_site_url', "https://lightroom-ai-tool.example.com"),
