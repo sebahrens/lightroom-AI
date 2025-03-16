@@ -17,6 +17,7 @@ import time
 from tqdm import tqdm
 import concurrent.futures
 from threading import Lock
+from functools import lru_cache
 
 from .config import AppConfig
 from .ai_providers import AiProvider
@@ -358,7 +359,7 @@ class KeywordConsolidator:
         if len(cleaned) <= 1 and cleaned not in ['a', 'i']:
             return ""
             
-    return cleaned
+        return cleaned
     
     def _group_similar_keywords(self, keywords: List[str], similarity_threshold: float = 0.92) -> List[List[str]]:
         """
