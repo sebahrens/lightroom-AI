@@ -15,6 +15,8 @@ from collections import defaultdict
 import logging
 import time
 from tqdm import tqdm
+import concurrent.futures
+from threading import Lock
 
 from .config import AppConfig
 from .ai_providers import AiProvider
@@ -51,6 +53,13 @@ class KeywordConsolidator:
         self.keyword_hierarchy = {}
         self.used_keywords = set()  # Track keywords that are actually used in images
         self.drop_all_keywords = False
+        
+        # For thread safety
+        self.lock = Lock()
+        
+        # Get max_workers from config or default to 1
+        self.max_workers = getattr(config, 'max_workers', 1)
+        logger.info(f"Initializing KeywordConsolidator with {self.max_workers} workers")
         
     def connect_to_db(self) -> None:
         """Connect to the Lightroom catalog database."""
@@ -292,13 +301,31 @@ class KeywordConsolidator:
             logger.info(f"Processing {len(keywords)} keywords in batches for LLM grouping")
             all_groups = []
             
-            # Process keywords in batches
-            for i in range(0, len(keywords), max_batch_size):
-                batch = keywords[i:i+max_batch_size]
-                batch_groups = self._process_llm_keyword_batch(batch)
-                all_groups.extend(batch_groups)
+            # Process keywords in batches using multiple workers
+            if self.max_workers > 1:
+                batches = [keywords[i:i+max_batch_size] for i in range(0, len(keywords), max_batch_size)]
+                logger.info(f"Processing {len(batches)} batches with up to {self.max_workers} workers")
                 
-            return all_groups
+                with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+                    future_to_batch = {executor.submit(self._process_llm_keyword_batch, batch): batch for batch in batches}
+                    
+                    for future in concurrent.futures.as_completed(future_to_batch):
+                        batch = future_to_batch[future]
+                        try:
+                            batch_groups = future.result()
+                            all_groups.extend(batch_groups)
+                        except Exception as e:
+                            logger.error(f"Error processing batch: {e}")
+                
+                return all_groups
+            else:
+                # Process sequentially if max_workers is 1
+                for i in range(0, len(keywords), max_batch_size):
+                    batch = keywords[i:i+max_batch_size]
+                    batch_groups = self._process_llm_keyword_batch(batch)
+                    all_groups.extend(batch_groups)
+                    
+                return all_groups
         else:
             return self._process_llm_keyword_batch(keywords)
     
@@ -512,18 +539,41 @@ class KeywordConsolidator:
             logger.info(f"Processing {len(keywords)} keywords in batches for LLM clustering")
             combined_clusters = {}
             
-            # Process keywords in batches
-            for i in range(0, len(keywords), max_batch_size):
-                batch = keywords[i:i+max_batch_size]
-                logger.info(f"Processing batch {i//max_batch_size + 1} with {len(batch)} keywords")
-                batch_clusters = self._process_llm_clustering_batch(batch)
+            # Process keywords in batches using multiple workers if configured
+            if self.max_workers > 1:
+                batches = [keywords[i:i+max_batch_size] for i in range(0, len(keywords), max_batch_size)]
+                logger.info(f"Processing {len(batches)} batches with up to {self.max_workers} workers")
                 
-                # Merge with combined results
-                for category, words in batch_clusters.items():
-                    if category in combined_clusters:
-                        combined_clusters[category].extend(words)
-                    else:
-                        combined_clusters[category] = words
+                with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+                    future_to_batch = {executor.submit(self._process_llm_clustering_batch, batch): batch for batch in batches}
+                    
+                    for future in concurrent.futures.as_completed(future_to_batch):
+                        batch = future_to_batch[future]
+                        try:
+                            batch_clusters = future.result()
+                            
+                            # Merge with combined results
+                            with self.lock:
+                                for category, words in batch_clusters.items():
+                                    if category in combined_clusters:
+                                        combined_clusters[category].extend(words)
+                                    else:
+                                        combined_clusters[category] = words
+                        except Exception as e:
+                            logger.error(f"Error processing batch: {e}")
+            else:
+                # Process sequentially if max_workers is 1
+                for i in range(0, len(keywords), max_batch_size):
+                    batch = keywords[i:i+max_batch_size]
+                    logger.info(f"Processing batch {i//max_batch_size + 1} with {len(batch)} keywords")
+                    batch_clusters = self._process_llm_clustering_batch(batch)
+                    
+                    # Merge with combined results
+                    for category, words in batch_clusters.items():
+                        if category in combined_clusters:
+                            combined_clusters[category].extend(words)
+                        else:
+                            combined_clusters[category] = words
             
             # Remove duplicates in each category
             for category in combined_clusters:
@@ -651,19 +701,50 @@ class KeywordConsolidator:
         # Split keywords into batches
         batches = [keywords[i:i + batch_size] for i in range(0, len(keywords), batch_size)]
         
-        for i, batch in enumerate(batches):
-            logger.info(f"Processing batch {i+1}/{len(batches)} with {len(batch)} keywords")
+        # Process batches in parallel if multiple workers are configured
+        if self.max_workers > 1:
+            logger.info(f"Processing {len(batches)} batches with up to {self.max_workers} workers")
             
-            # Process this batch
-            prompt = self._get_clustering_prompt(batch)
-            batch_clusters = self._process_clustering_prompt(prompt)
-            
-            # Merge with combined results
-            for category, words in batch_clusters.items():
-                if category in combined_clusters:
-                    combined_clusters[category].extend(words)
-                else:
-                    combined_clusters[category] = words
+            with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+                # Create a function to process a batch and return the results
+                def process_batch(batch_idx, batch):
+                    logger.info(f"Processing batch {batch_idx+1}/{len(batches)} with {len(batch)} keywords")
+                    prompt = self._get_clustering_prompt(batch)
+                    return self._process_clustering_prompt(prompt)
+                
+                # Submit all batches to the executor
+                future_to_batch = {executor.submit(process_batch, i, batch): (i, batch) for i, batch in enumerate(batches)}
+                
+                # Process results as they complete
+                for future in concurrent.futures.as_completed(future_to_batch):
+                    batch_idx, batch = future_to_batch[future]
+                    try:
+                        batch_clusters = future.result()
+                        
+                        # Merge with combined results
+                        with self.lock:
+                            for category, words in batch_clusters.items():
+                                if category in combined_clusters:
+                                    combined_clusters[category].extend(words)
+                                else:
+                                    combined_clusters[category] = words
+                    except Exception as e:
+                        logger.error(f"Error processing batch {batch_idx+1}: {e}")
+        else:
+            # Process sequentially if max_workers is 1
+            for i, batch in enumerate(batches):
+                logger.info(f"Processing batch {i+1}/{len(batches)} with {len(batch)} keywords")
+                
+                # Process this batch
+                prompt = self._get_clustering_prompt(batch)
+                batch_clusters = self._process_clustering_prompt(prompt)
+                
+                # Merge with combined results
+                for category, words in batch_clusters.items():
+                    if category in combined_clusters:
+                        combined_clusters[category].extend(words)
+                    else:
+                        combined_clusters[category] = words
         
         # Remove duplicates in each category
         for category in combined_clusters:
@@ -1374,7 +1455,7 @@ class KeywordConsolidator:
             Dictionary with results
         """
         try:
-            logger.info("Starting keyword consolidation process")
+            logger.info(f"Starting keyword consolidation process with {self.max_workers} workers")
             
             # Extract keywords
             start_keyword_count = len(self.extract_keywords())
