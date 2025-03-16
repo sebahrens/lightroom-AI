@@ -75,3 +75,7 @@ The keyword consolidator can be run as a standalone CLI tool to:
 
 ### Install from PyPI
 
+clone this repo
+cd lightroom-ai
+pip install -e .
+lightroom-ai --create-config
