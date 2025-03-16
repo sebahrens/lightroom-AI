@@ -77,6 +77,8 @@ class RateLimitedLLM:
                 
                 Return the groups as a JSON array of arrays. Each inner array should contain similar keywords.
                 Format: [["keyword1", "keyword2"], ["keyword3", "keyword4", "keyword5"], ...]
+                
+                IMPORTANT: Return ONLY the JSON array with no additional text or explanation.
                 """
                 
                 # Create a dummy image since our AI providers expect an image
@@ -89,10 +91,8 @@ class RateLimitedLLM:
                     # Try to extract JSON from the response
                     analysis_text = response['analysis']
                     
-                    # Parse the JSON response
-                    import json
-                    from lightroom_ai.utils import extract_json
-                    json_data = extract_json(analysis_text, logger, True)
+                    # Try to parse the JSON response using our improved parsing method
+                    json_data = self._extract_json_array(analysis_text)
                     
                     if json_data and isinstance(json_data, list):
                         # Filter out empty groups
@@ -126,6 +126,65 @@ class RateLimitedLLM:
         # If we get here, LLM grouping failed after all attempts
         logger.warning("LLM keyword grouping failed after all retries")
         return []
+    
+    def _extract_json_array(self, text: str) -> Optional[List]:
+        """
+        Extract a JSON array from text with improved handling for array responses.
+        
+        Args:
+            text: Text containing a JSON array
+            
+        Returns:
+            Parsed JSON array or None if parsing fails
+        """
+        try:
+            # First try direct JSON parsing
+            return json.loads(text)
+        except json.JSONDecodeError:
+            logger.debug("Direct JSON parsing failed, trying alternative methods")
+            
+            # Try to extract JSON array with regex
+            # Look for array pattern starting with [ and ending with ]
+            array_match = re.search(r'\[\s*\[.+\]\s*\]', text, re.DOTALL)
+            if array_match:
+                try:
+                    array_text = array_match.group(0)
+                    logger.debug(f"Found potential JSON array: {array_text[:100]}...")
+                    return json.loads(array_text)
+                except json.JSONDecodeError:
+                    logger.debug("Failed to parse JSON array with regex match")
+            
+            # Try to find the array between code blocks
+            code_block_match = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', text, re.DOTALL)
+            if code_block_match:
+                try:
+                    code_text = code_block_match.group(1)
+                    return json.loads(code_text)
+                except json.JSONDecodeError:
+                    logger.debug("Failed to parse JSON from code block")
+            
+            # Try to find array with bracket counting
+            try:
+                logger.debug(f"Attempting to parse JSON array: {text[:100]}...")
+                # Find the first opening bracket
+                start_idx = text.find('[')
+                if start_idx != -1:
+                    # Count brackets to find the matching closing bracket
+                    bracket_count = 1
+                    for i in range(start_idx + 1, len(text)):
+                        if text[i] == '[':
+                            bracket_count += 1
+                        elif text[i] == ']':
+                            bracket_count -= 1
+                            if bracket_count == 0:
+                                # Found the matching closing bracket
+                                json_text = text[start_idx:i+1]
+                                return json.loads(json_text)
+                logger.debug("Failed to parse JSON array with brackets")
+            except Exception as e:
+                logger.debug(f"Failed to parse JSON array with brackets: {e}")
+            
+            return None
 
 
 class KeywordConsolidator:
@@ -488,6 +547,65 @@ class KeywordConsolidator:
             batch_str = '|||||'.join(keywords)
             return self._llm_client.process_batch(batch_str)
     
+    def _extract_json_array(self, text: str) -> Optional[List]:
+        """
+        Extract a JSON array from text with improved handling for array responses.
+        
+        Args:
+            text: Text containing a JSON array
+            
+        Returns:
+            Parsed JSON array or None if parsing fails
+        """
+        try:
+            # First try direct JSON parsing
+            return json.loads(text)
+        except json.JSONDecodeError:
+            logger.debug("Direct JSON parsing failed, trying alternative methods")
+            
+            # Try to extract JSON array with regex
+            # Look for array pattern starting with [ and ending with ]
+            array_match = re.search(r'\[\s*\[.+\]\s*\]', text, re.DOTALL)
+            if array_match:
+                try:
+                    array_text = array_match.group(0)
+                    logger.debug(f"Found potential JSON array: {array_text[:100]}...")
+                    return json.loads(array_text)
+                except json.JSONDecodeError:
+                    logger.debug("Failed to parse JSON array with regex match")
+            
+            # Try to find the array between code blocks
+            code_block_match = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', text, re.DOTALL)
+            if code_block_match:
+                try:
+                    code_text = code_block_match.group(1)
+                    return json.loads(code_text)
+                except json.JSONDecodeError:
+                    logger.debug("Failed to parse JSON from code block")
+            
+            # Try to find array with bracket counting
+            try:
+                logger.debug(f"Attempting to parse JSON array: {text[:100]}...")
+                # Find the first opening bracket
+                start_idx = text.find('[')
+                if start_idx != -1:
+                    # Count brackets to find the matching closing bracket
+                    bracket_count = 1
+                    for i in range(start_idx + 1, len(text)):
+                        if text[i] == '[':
+                            bracket_count += 1
+                        elif text[i] == ']':
+                            bracket_count -= 1
+                            if bracket_count == 0:
+                                # Found the matching closing bracket
+                                json_text = text[start_idx:i+1]
+                                return json.loads(json_text)
+                logger.debug("Failed to parse JSON array with brackets")
+            except Exception as e:
+                logger.debug(f"Failed to parse JSON array with brackets: {e}")
+            
+            return None
+    
     def _process_llm_keyword_batch(self, keywords: List[str]) -> List[List[str]]:
         """
         Process a batch of keywords with the LLM for semantic grouping.
@@ -536,8 +654,8 @@ class KeywordConsolidator:
                     analysis_text = response['analysis']
                     logger.debug(f"LLM grouping response: {analysis_text[:500]}...")
                     
-                    # Use the extract_json utility function
-                    json_data = extract_json(analysis_text, logger, self.config.debug_mode if hasattr(self.config, 'debug_mode') else False)
+                    # Use our improved JSON extraction method
+                    json_data = self._extract_json_array(analysis_text)
                     
                     if json_data and isinstance(json_data, list):
                         # Filter out empty groups and ensure all groups are lists
@@ -816,8 +934,8 @@ class KeywordConsolidator:
                     analysis_text = response['analysis']
                     logger.debug(f"LLM clustering response: {analysis_text[:500]}...")
                     
-                    # Use the extract_json utility function
-                    json_data = extract_json(analysis_text, logger, self.config.debug_mode if hasattr(self.config, 'debug_mode') else False)
+                    # Use our improved JSON extraction method
+                    json_data = self._extract_json_object(analysis_text)
                     
                     if json_data and isinstance(json_data, dict):
                         # Validate that all values are lists
@@ -844,6 +962,64 @@ class KeywordConsolidator:
         # If we get here, LLM clustering failed after all attempts
         logger.warning("LLM keyword clustering failed, falling back to traditional clustering")
         return self._fallback_clustering(keywords)
+    
+    def _extract_json_object(self, text: str) -> Optional[Dict]:
+        """
+        Extract a JSON object from text with improved handling for object responses.
+        
+        Args:
+            text: Text containing a JSON object
+            
+        Returns:
+            Parsed JSON object or None if parsing fails
+        """
+        try:
+            # First try direct JSON parsing
+            return json.loads(text)
+        except json.JSONDecodeError:
+            logger.debug("Direct JSON parsing failed, trying alternative methods")
+            
+            # Try to extract JSON object with regex
+            # Look for object pattern starting with { and ending with }
+            object_match = re.search(r'\{.+\}', text, re.DOTALL)
+            if object_match:
+                try:
+                    object_text = object_match.group(0)
+                    logger.debug(f"Found potential JSON object: {object_text[:100]}...")
+                    return json.loads(object_text)
+                except json.JSONDecodeError:
+                    logger.debug("Failed to parse JSON object with regex match")
+            
+            # Try to find the object between code blocks
+            code_block_match = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', text, re.DOTALL)
+            if code_block_match:
+                try:
+                    code_text = code_block_match.group(1)
+                    return json.loads(code_text)
+                except json.JSONDecodeError:
+                    logger.debug("Failed to parse JSON from code block")
+            
+            # Try to find object with bracket counting
+            try:
+                # Find the first opening brace
+                start_idx = text.find('{')
+                if start_idx != -1:
+                    # Count braces to find the matching closing brace
+                    brace_count = 1
+                    for i in range(start_idx + 1, len(text)):
+                        if text[i] == '{':
+                            brace_count += 1
+                        elif text[i] == '}':
+                            brace_count -= 1
+                            if brace_count == 0:
+                                # Found the matching closing brace
+                                json_text = text[start_idx:i+1]
+                                return json.loads(json_text)
+                logger.debug("Failed to parse JSON object with braces")
+            except Exception as e:
+                logger.debug(f"Failed to parse JSON object with braces: {e}")
+            
+            return None
     
     def _process_keywords_in_batches(self, keywords: List[str], batch_size: int) -> Dict[str, List[str]]:
         """
@@ -1229,8 +1405,8 @@ class KeywordConsolidator:
                 analysis_text = response['analysis']
                 logger.debug(f"AI response: {analysis_text[:500]}...")
                 
-                # Use the extract_json utility function
-                json_data = extract_json(analysis_text, logger, self.config.debug_mode if hasattr(self.config, 'debug_mode') else False)
+                # Use our improved JSON extraction method
+                json_data = self._extract_json_object(analysis_text)
                 if json_data:
                     return json_data
                 
@@ -1294,7 +1470,7 @@ class KeywordConsolidator:
                 analysis_text = response.get('analysis', '')
                 if analysis_text:
                     # Try to extract JSON from the text
-                    json_data = extract_json(analysis_text, logger, self.config.debug_mode if hasattr(self.config, 'debug_mode') else False)
+                    json_data = self._extract_json_object(analysis_text)
                     if json_data and isinstance(json_data, dict):
                         response = json_data
                 
