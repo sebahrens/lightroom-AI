@@ -67,3 +67,11 @@ The keyword consolidator can be run as a standalone CLI tool to:
 
 ## Installation
 
+### Prerequisites
+
+- Python 3.8 or higher
+- Adobe Lightroom Classic (tested with versions 10.0+)
+- API keys for your chosen AI provider (Claude, OpenRouter, or local Ollama setup)
+
+### Install from PyPI
+
