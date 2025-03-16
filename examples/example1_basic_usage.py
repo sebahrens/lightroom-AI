@@ -1,0 +1,72 @@
+#!/usr/bin/env python3
+"""
+Example 1: Basic Usage for Analyzing a Catalog
+
+This example demonstrates the most straightforward way to use the Lightroom AI Tool
+to analyze a catalog with default settings from the config file.
+"""
+
+import os
+import sys
+import logging
+import argparse
+from pathlib import Path
+
+# Add the parent directory to sys.path to import the package
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from lightroom_ai.config import load_config
+from lightroom_ai.batch_processor import BatchProcessor
+from lightroom_ai.logging_setup import setup_logging
+
+
+def basic_usage_example():
+    """Basic usage example."""
+    # Setup argument parser
+    parser = argparse.ArgumentParser(description="Basic usage example for Lightroom AI Tool")
+    parser.add_argument("catalog_path", help="Path to Lightroom catalog (.lrcat file)")
+    parser.add_argument("--api-key", help="Override API key from config file")
+    args = parser.parse_args()
+
+    # Check if catalog exists
+    if not os.path.exists(args.catalog_path):
+        print(f"Error: Catalog not found: {args.catalog_path}")
+        return 1
+
+    # Load configuration
+    config_path = os.path.join(Path(__file__).parent.parent, "config.json")
+    if not os.path.exists(config_path):
+        print(f"Error: Configuration file not found: {config_path}")
+        return 1
+
+    config = load_config(config_path)
+    
+    # Override API key if provided
+    if args.api_key and hasattr(config.provider, 'api_key'):
+        config.provider.api_key = args.api_key
+        print(f"Using API key from command line")
+
+    # Setup logging
+    setup_logging(config)
+    
+    # Process the catalog
+    print(f"Processing catalog: {args.catalog_path}")
+    processor = BatchProcessor(args.catalog_path, config)
+    stats = processor.run()
+    
+    # Print summary
+    print("\nProcessing complete!")
+    print(f"Total images: {stats['total_images']}")
+    print(f"Successfully processed: {stats['successful_images']}")
+    print(f"Failed to process: {stats['failed_images']}")
+    print(f"Skipped (already processed): {stats.get('skipped_images', 0)}")
+    
+    if 'total_time' in stats:
+        print(f"Total time: {stats['total_time']:.1f} seconds")
+        print(f"Average time per image: {stats['avg_time_per_image']:.2f} seconds")
+    
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(basic_usage_example())
