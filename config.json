@@ -1,6 +1,6 @@
 {
   "provider": "openrouter",
-  "openrouter_api_key": $OPENROUTER_API_KEY,
+  "openrouter_api_key": "YOUR_OPENROUTER_API_KEY_HERE",
   "openrouter_model": "google/gemini-2.0-flash-001",
   "openrouter_api_url": "https://openrouter.ai/api/v1/chat/completions",
   "openrouter_site_url": "https://your-app-url.com",
