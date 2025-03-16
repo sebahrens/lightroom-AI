@@ -22,7 +22,110 @@ from .config import AppConfig
 from .ai_providers import AiProvider
 from .utils import get_logger, extract_json
 
+
+WHITESPACE_PATTERN = re.compile(r'\s+')
+SPECIAL_CHARS_PATTERN = re.compile(r'[^\w\s-]', flags=re.UNICODE)
+
 logger = get_logger(__name__)
+
+class RateLimitedLLM:
+    """Class to handle LLM API calls with rate limiting and caching."""
+    
+    def __init__(self, ai_provider, max_retries=3, initial_backoff=1, cache_size=100):
+        """
+        Initialize the rate-limited LLM wrapper.
+        
+        Args:
+            ai_provider: The AI provider instance to use
+            max_retries: Maximum number of retries for failed calls
+            initial_backoff: Initial backoff time in seconds
+            cache_size: Size of the LRU cache for API results
+        """
+        self.ai_provider = ai_provider
+        self.max_retries = max_retries
+        self.initial_backoff = initial_backoff
+        self.process_batch = lru_cache(maxsize=cache_size)(self._process_batch_uncached)
+        
+    def _process_batch_uncached(self, keywords_str):
+        """
+        Process a batch of keywords with the LLM.
+        
+        Args:
+            keywords_str: String representation of keywords to process
+            
+        Returns:
+            Processed results from the LLM
+        """
+        # Convert string to list (needed because cache keys must be hashable)
+        keywords = keywords_str.split('|||||')
+        
+        for attempt in range(self.max_retries):
+            try:
+                # Create a prompt for the LLM
+                prompt = f"""
+                I have a list of photography keywords that need to be grouped by semantic similarity.
+                Group keywords that represent the same concept or are very similar.
+                
+                For example:
+                - "sunset", "sunsets", "setting sun" should be in one group
+                - "portrait", "portraiture", "portraits" should be in one group
+                - "landscape", "landscapes", "scenic" should be in one group
+                
+                Here are the keywords:
+                {', '.join(keywords)}
+                
+                Return the groups as a JSON array of arrays. Each inner array should contain similar keywords.
+                Format: [["keyword1", "keyword2"], ["keyword3", "keyword4", "keyword5"], ...]
+                """
+                
+                # Create a dummy image since our AI providers expect an image
+                dummy_image = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
+                
+                # Call the AI provider with the prompt and dummy image
+                response = self.ai_provider.analyze_image(dummy_image, user_prompt=prompt)
+                
+                if response and 'analysis' in response:
+                    # Try to extract JSON from the response
+                    analysis_text = response['analysis']
+                    
+                    # Parse the JSON response
+                    import json
+                    from lightroom_ai.utils import extract_json
+                    json_data = extract_json(analysis_text, logger, True)
+                    
+                    if json_data and isinstance(json_data, list):
+                        # Filter out empty groups
+                        valid_groups = []
+                        for group in json_data:
+                            if isinstance(group, list) and len(group) > 0:
+                                valid_groups.append(group)
+                        
+                        if valid_groups:
+                            logger.info(f"LLM identified {len(valid_groups)} keyword groups")
+                            return valid_groups
+                
+                # If we get here, either no response or invalid format
+                logger.warning(f"LLM grouping attempt {attempt+1} failed, retrying...")
+                
+                # Exponential backoff with jitter
+                import random
+                backoff = self.initial_backoff * (2 ** attempt) * (0.5 + random.random())
+                logger.info(f"Backing off for {backoff:.2f} seconds before retry")
+                time.sleep(backoff)
+                
+            except Exception as e:
+                logger.error(f"Error in LLM keyword grouping (attempt {attempt+1}): {e}")
+                
+                # Exponential backoff with jitter
+                import random
+                backoff = self.initial_backoff * (2 ** attempt) * (0.5 + random.random())
+                logger.info(f"Backing off for {backoff:.2f} seconds before retry")
+                time.sleep(backoff)
+        
+        # If we get here, LLM grouping failed after all attempts
+        logger.warning("LLM keyword grouping failed after all retries")
+        return []
+
 
 class KeywordConsolidator:
     """Class to handle keyword consolidation in Lightroom catalogs."""
@@ -73,8 +176,8 @@ class KeywordConsolidator:
     
     def extract_keywords(self) -> Set[str]:
         """
-        Extract all keywords from the Lightroom catalog.
-        
+        Extract all keywords from the Lightroom catalog efficiently using a single query.
+    
         Returns:
             Set of unique keywords
         """
@@ -83,41 +186,42 @@ class KeywordConsolidator:
             
         try:
             cursor = self.db_conn.cursor()
-            
-            # Query to get all keywords from the AgLibraryKeyword table
-            cursor.execute("SELECT name FROM AgLibraryKeyword")
+        
+            # Use a single query with LEFT JOIN to get both all keywords and used keywords
+            cursor.execute("""
+                SELECT k.name, 
+                       COUNT(ki.tag) > 0 AS is_used
+                FROM AgLibraryKeyword k
+                LEFT JOIN AgLibraryKeywordImage ki ON k.id_local = ki.tag
+                GROUP BY k.name
+            """)
             rows = cursor.fetchall()
-            
-            # Extract keywords and add to set
+        
+            keywords_set = set()
+            used_keywords_set = set()
+        
             for row in rows:
                 keyword = row['name']
                 if keyword and keyword.strip():
-                    self.keywords.add(keyword.strip())
-            
-            # Also get keywords that are actually used in images
-            cursor.execute("""
-                SELECT DISTINCT k.name 
-                FROM AgLibraryKeyword k
-                JOIN AgLibraryKeywordImage ki ON k.id_local = ki.tag
-            """)
-            
-            used_keywords_rows = cursor.fetchall()
-            for row in used_keywords_rows:
-                keyword = row['name']
-                if keyword and keyword.strip():
-                    self.used_keywords.add(keyword.strip())
-            
+                    clean_keyword = keyword.strip()
+                    keywords_set.add(clean_keyword)
+                    if row['is_used']:
+                        used_keywords_set.add(clean_keyword)
+        
+            self.keywords = keywords_set
+            self.used_keywords = used_keywords_set
+        
             logger.info(f"Extracted {len(self.keywords)} unique keywords from catalog ({len(self.used_keywords)} used in images)")
             return self.keywords
-            
+    
         except sqlite3.Error as e:
             logger.error(f"Error extracting keywords: {e}")
             raise RuntimeError(f"Error extracting keywords: {e}")
     
     def clean_and_normalize_keywords(self) -> Dict[str, str]:
         """
-        Clean and normalize keywords, collapsing similar terms.
-        
+        Clean and normalize keywords, collapsing similar terms with improved performance.
+    
         Returns:
             Dictionary mapping original keywords to cleaned versions
         """
@@ -126,7 +230,7 @@ class KeywordConsolidator:
             
         logger.info("Cleaning and normalizing keywords...")
         
-        # First pass: basic cleaning
+        # First pass: basic cleaning - do this in one pass
         cleaned_keywords = {}
         for keyword in self.keywords:
             cleaned = self._basic_keyword_cleaning(keyword)
@@ -136,14 +240,14 @@ class KeywordConsolidator:
         # Get the similarity threshold from config or use default
         similarity_threshold = getattr(self.config, 'keyword_similarity_threshold', 0.92)
         
-        # Use LLM for grouping similar keywords
+        # Use LLM for grouping similar keywords if configured
         if hasattr(self.config, 'use_llm_grouping') and self.config.use_llm_grouping:
             logger.info("Using LLM for keyword grouping")
             unique_cleaned = list(set(cleaned_keywords.values()))
-            
+        
             # Group similar keywords using LLM
             similarity_groups = self._group_keywords_with_llm(unique_cleaned)
-            
+        
             # Create mapping from original to canonical form
             canonical_mapping = {}
             for group in similarity_groups:
@@ -151,18 +255,47 @@ class KeywordConsolidator:
                     canonical = self._select_canonical_keyword(group)
                     for keyword in group:
                         canonical_mapping[keyword] = canonical
-            
-            # Final mapping from original keywords to canonical forms
-            final_mapping = {}
-            for original, cleaned in cleaned_keywords.items():
-                if cleaned in canonical_mapping:
-                    final_mapping[original] = canonical_mapping[cleaned]
-                else:
-                    final_mapping[original] = cleaned
         else:
             # Use traditional similarity-based grouping
-            similarity_groups = self._group_similar_keywords(list(cleaned_keywords.values()), similarity_threshold)
+            # Speed up the process by creating a sorted list of keywords for faster comparison
+            unique_values = list(set(cleaned_keywords.values()))
+            sorted_by_length = sorted(unique_values, key=len)
+        
+            # Group similar keywords with optimized algorithm
+            similarity_groups = []
+            processed = set()
+        
+            # Process keywords in order of length (shortest first)
+            for keyword in sorted_by_length:
+                if keyword in processed:
+                    continue
+                
+                # Skip very short keywords for grouping
+                if len(keyword) < 3:
+                    processed.add(keyword)
+                    similarity_groups.append([keyword])
+                    continue
+                
+                # Start a new group with this keyword
+                group = [keyword]
+                processed.add(keyword)
             
+                # Find similar keywords - limit comparisons to keywords within +/-50% of length
+                keyword_len = len(keyword)
+                min_len = max(3, int(keyword_len * 0.5))
+                max_len = int(keyword_len * 1.5) + 1
+            
+                # Only compare with unprocessed keywords in the length range
+                potential_matches = [k for k in sorted_by_length if min_len <= len(k) <= max_len and k not in processed]
+            
+                for other in potential_matches:
+                    # Use cached similarity method
+                    if self._are_keywords_similar(keyword, other, similarity_threshold):
+                        group.append(other)
+                        processed.add(other)
+            
+                similarity_groups.append(group)
+        
             # Create mapping from original to canonical form
             canonical_mapping = {}
             for group in similarity_groups:
@@ -171,13 +304,13 @@ class KeywordConsolidator:
                 for keyword in group:
                     canonical_mapping[keyword] = canonical
             
-            # Final mapping from original keywords to canonical forms
-            final_mapping = {}
-            for original, cleaned in cleaned_keywords.items():
-                if cleaned in canonical_mapping:
-                    final_mapping[original] = canonical_mapping[cleaned]
-                else:
-                    final_mapping[original] = cleaned
+        # Final mapping from original keywords to canonical forms
+        final_mapping = {}
+        for original, cleaned in cleaned_keywords.items():
+            if cleaned in canonical_mapping:
+                final_mapping[original] = canonical_mapping[cleaned]
+            else:
+                final_mapping[original] = cleaned
         
         # Count how many keywords were collapsed
         unique_cleaned = len(set(final_mapping.values()))
@@ -198,31 +331,34 @@ class KeywordConsolidator:
     
     def _basic_keyword_cleaning(self, keyword: str) -> str:
         """
-        Perform basic cleaning on a keyword.
-        
+        Perform basic cleaning on a keyword with optimized regex patterns.
+    
         Args:
             keyword: Original keyword
-            
+        
         Returns:
             Cleaned keyword
         """
-        # Convert to lowercase
-        cleaned = keyword.lower()
+        if not keyword:
+            return ""
         
-        # Remove leading/trailing whitespace and punctuation
-        cleaned = cleaned.strip().strip('.,;:!?-_"\'')
-        
-        # Replace multiple spaces with a single space
-        cleaned = re.sub(r'\s+', ' ', cleaned)
-        
-        # Remove special characters except spaces and hyphens
-        cleaned = re.sub(r'[^\w\s-]', '', cleaned, flags=re.UNICODE)
-        
+        # Convert to lowercase and strip whitespace
+        cleaned = keyword.lower().strip()
+    
+        # Remove leading/trailing punctuation
+        cleaned = cleaned.strip('.,;:!?-_"\'')
+    
+        # Replace multiple spaces with a single space using precompiled pattern
+        cleaned = WHITESPACE_PATTERN.sub(' ', cleaned)
+    
+        # Remove special characters except spaces and hyphens using precompiled pattern
+        cleaned = SPECIAL_CHARS_PATTERN.sub('', cleaned)
+    
         # Skip very short words (except common words like "a" and "i")
         if len(cleaned) <= 1 and cleaned not in ['a', 'i']:
             return ""
             
-        return cleaned
+    return cleaned
     
     def _group_similar_keywords(self, keywords: List[str], similarity_threshold: float = 0.92) -> List[List[str]]:
         """
@@ -286,48 +422,70 @@ class KeywordConsolidator:
     
     def _group_keywords_with_llm(self, keywords: List[str]) -> List[List[str]]:
         """
-        Use LLM to identify groups of semantically similar keywords.
-        
+        Use LLM to identify groups of semantically similar keywords with optimized batching.
+    
         Args:
             keywords: List of keywords to group
-            
+        
         Returns:
             List of groups of semantically similar keywords
         """
+        if not hasattr(self, '_llm_client'):
+            self._llm_client = RateLimitedLLM(self.ai_provider)
+    
         # If we have too many keywords, process in batches
         max_batch_size = 200  # Limit to avoid token limits
-        
+    
         if len(keywords) > max_batch_size:
             logger.info(f"Processing {len(keywords)} keywords in batches for LLM grouping")
             all_groups = []
-            
+        
             # Process keywords in batches using multiple workers
             if self.max_workers > 1:
-                batches = [keywords[i:i+max_batch_size] for i in range(0, len(keywords), max_batch_size)]
+                # Split keywords into batches
+                batches = []
+                for i in range(0, len(keywords), max_batch_size):
+                    batch = keywords[i:i+max_batch_size]
+                    # Convert to string for hashable cache key
+                    batch_str = '|||||'.join(batch)
+                    batches.append(batch_str)
+            
                 logger.info(f"Processing {len(batches)} batches with up to {self.max_workers} workers")
-                
+            
+                # Process batches with thread pool
                 with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-                    future_to_batch = {executor.submit(self._process_llm_keyword_batch, batch): batch for batch in batches}
-                    
+                    # Create a mapping of futures to batch_str
+                    future_to_batch = {
+                        executor.submit(self._llm_client.process_batch, batch_str): batch_str 
+                        for batch_str in batches
+                    }
+                
+                    # Process results as they complete
                     for future in concurrent.futures.as_completed(future_to_batch):
-                        batch = future_to_batch[future]
                         try:
                             batch_groups = future.result()
-                            all_groups.extend(batch_groups)
+                        
+                            # Merge with combined results
+                            with self.lock:
+                                all_groups.extend(batch_groups)
                         except Exception as e:
                             logger.error(f"Error processing batch: {e}")
-                
+            
                 return all_groups
             else:
                 # Process sequentially if max_workers is 1
                 for i in range(0, len(keywords), max_batch_size):
                     batch = keywords[i:i+max_batch_size]
-                    batch_groups = self._process_llm_keyword_batch(batch)
+                    batch_str = '|||||'.join(batch)
+                    logger.info(f"Processing batch {i//max_batch_size + 1} with {len(batch)} keywords")
+                    batch_groups = self._llm_client.process_batch(batch_str)
                     all_groups.extend(batch_groups)
                     
                 return all_groups
         else:
-            return self._process_llm_keyword_batch(keywords)
+            # Process all keywords at once
+            batch_str = '|||||'.join(keywords)
+            return self._llm_client.process_batch(batch_str)
     
     def _process_llm_keyword_batch(self, keywords: List[str]) -> List[List[str]]:
         """
@@ -403,27 +561,28 @@ class KeywordConsolidator:
         logger.warning("LLM keyword grouping failed, falling back to similarity-based grouping")
         return self._group_similar_keywords(keywords)
     
+    @lru_cache(maxsize=10000)
     def _are_keywords_similar(self, keyword1: str, keyword2: str, similarity_threshold: float = 0.92) -> bool:
         """
-        Determine if two keywords are semantically similar.
-        
+        Determine if two keywords are semantically similar with caching to avoid repeated calculations.
+    
         Args:
             keyword1: First keyword
             keyword2: Second keyword
             similarity_threshold: Threshold for considering keywords similar
-            
+        
         Returns:
             True if the keywords are similar, False otherwise
         """
         # If the keywords are identical
         if keyword1 == keyword2:
             return True
-            
+        
         # If one is a substring of the other, they must be at least 4 chars long
         if len(keyword1) >= 4 and len(keyword2) >= 4:
             if keyword1 in keyword2 or keyword2 in keyword1:
                 return True
-        
+    
         # Check for plural/singular forms
         if keyword1 + 's' == keyword2 or keyword2 + 's' == keyword1:
             return True
@@ -433,11 +592,11 @@ class KeywordConsolidator:
             return True
         if keyword2.endswith('y') and keyword2[:-1] + 'ies' == keyword1:
             return True
-            
-        # Check similarity ratio
+        
+        # Check similarity ratio - this is the most expensive operation
         similarity = difflib.SequenceMatcher(None, keyword1, keyword2).ratio()
         return similarity >= similarity_threshold
-    
+        
     def _select_canonical_keyword(self, group: List[str]) -> str:
         """
         Select the canonical form from a group of similar keywords.
@@ -1248,8 +1407,8 @@ class KeywordConsolidator:
     
     def update_catalog_keywords(self) -> int:
         """
-        Update the Lightroom catalog with hierarchical keywords.
-        
+        Update the Lightroom catalog with hierarchical keywords using batch processing.
+    
         Returns:
             Number of keywords updated
         """
@@ -1276,7 +1435,7 @@ class KeywordConsolidator:
             cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='AgLibraryKeywordTree'")
             keyword_tree_exists = cursor.fetchone() is not None
             
-            # Get existing keywords
+            # Get existing keywords 
             cursor.execute("SELECT id_local, id_global, name FROM AgLibraryKeyword")
             existing_keywords = {row['name']: {'id': row['id_local'], 'global_id': row['id_global']} for row in cursor.fetchall()}
             
@@ -1284,6 +1443,7 @@ class KeywordConsolidator:
             new_keywords = set()
             delimiter = self.config.keyword_delimiter if hasattr(self.config, 'keyword_delimiter') else '|'
             
+            # Find all new keywords that need to be created
             for hierarchical_path in self.keyword_hierarchy.values():
                 parts = hierarchical_path.split(delimiter)
                 for i in range(len(parts)):
@@ -1291,70 +1451,99 @@ class KeywordConsolidator:
                     if partial_path not in existing_keywords:
                         new_keywords.add(partial_path)
             
-            # Add new keywords to the catalog
-            for keyword in new_keywords:
-                # Generate a unique global ID for the new keyword
-                global_id = self._generate_global_id()
-                
-                cursor.execute(
-                    "INSERT INTO AgLibraryKeyword (id_global, name, dateCreated) VALUES (?, ?, datetime('now'))",
-                    (global_id, keyword)
-                )
-                keyword_id = cursor.lastrowid
-                existing_keywords[keyword] = {'id': keyword_id, 'global_id': global_id}
-                
-                # Also add to keyword tree if the table exists
-                if keyword_tree_exists:
-                    cursor.execute(
-                        "INSERT INTO AgLibraryKeywordTree (keywordID, lc_name) VALUES (?, ?)",
-                        (keyword_id, keyword.lower())
-                    )
+            # Add new keywords to the catalog in batches of 500
+            new_keywords_list = list(new_keywords)
+            keyword_batch_size = 500
+        
+            for i in range(0, len(new_keywords_list), keyword_batch_size):
+                # Get the current batch
+                batch = new_keywords_list[i:i+keyword_batch_size]
+                logger.info(f"Processing keyword batch {i//keyword_batch_size + 1}/{(len(new_keywords_list) + keyword_batch_size - 1)//keyword_batch_size}")
             
+                # Process each keyword in the batch
+                for keyword in batch:
+                    # Generate a unique global ID for the new keyword
+                    global_id = self._generate_global_id()
+                
+                    cursor.execute(
+                        "INSERT INTO AgLibraryKeyword (id_global, name, dateCreated) VALUES (?, ?, datetime('now'))",
+                        (global_id, keyword)
+                    )
+                    keyword_id = cursor.lastrowid
+                    existing_keywords[keyword] = {'id': keyword_id, 'global_id': global_id}
+                
+                    # Also add to keyword tree if the table exists
+                    if keyword_tree_exists:
+                        cursor.execute(
+                            "INSERT INTO AgLibraryKeywordTree (keywordID, lc_name) VALUES (?, ?)",
+                            (keyword_id, keyword.lower())
+                        )
+        
             # Check if the relationship table exists
             cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='AgLibraryKeywordTreeRelation'")
             relation_table_exists = cursor.fetchone() is not None
             
             # Update keyword relationships if the table exists
             if relation_table_exists:
+                # Process relationships in batches
+                relationships = []
                 for hierarchical_path in self.keyword_hierarchy.values():
                     parts = hierarchical_path.split(delimiter)
                     for i in range(1, len(parts)):
                         parent = delimiter.join(parts[:i])
                         child = delimiter.join(parts[:i+1])
-                        
+                    
                         if parent in existing_keywords and child in existing_keywords:
-                            parent_id = existing_keywords[parent]['id']
-                            child_id = existing_keywords[child]['id']
-                            
-                            # Check if relationship already exists
+                            relationships.append((
+                                existing_keywords[child]['id'],  # child_id
+                                existing_keywords[parent]['id']  # parent_id
+                            ))
+            
+                # Insert relationships in batches
+                relationship_batch_size = 1000
+                for i in range(0, len(relationships), relationship_batch_size):
+                    batch = relationships[i:i+relationship_batch_size]
+                    logger.info(f"Updating relationships batch {i//relationship_batch_size + 1}/{(len(relationships) + relationship_batch_size - 1)//relationship_batch_size}")
+                
+                    for child_id, parent_id in batch:
+                        # Check if relationship already exists
+                        cursor.execute(
+                            "SELECT COUNT(*) FROM AgLibraryKeywordTreeRelation WHERE keywordID = ? AND parentID = ?",
+                            (child_id, parent_id)
+                        )
+                        if cursor.fetchone()[0] == 0:
                             cursor.execute(
-                                "SELECT COUNT(*) FROM AgLibraryKeywordTreeRelation WHERE keywordID = ? AND parentID = ?",
+                                "INSERT INTO AgLibraryKeywordTreeRelation (keywordID, parentID) VALUES (?, ?)",
                                 (child_id, parent_id)
                             )
-                            if cursor.fetchone()[0] == 0:
-                                cursor.execute(
-                                    "INSERT INTO AgLibraryKeywordTreeRelation (keywordID, parentID) VALUES (?, ?)",
-                                    (child_id, parent_id)
-                                )
-                                updated_count += 1
+                            updated_count += 1
             else:
                 # If the relationship table doesn't exist, update the parent field in AgLibraryKeyword
+                relationships = []
                 for hierarchical_path in self.keyword_hierarchy.values():
                     parts = hierarchical_path.split(delimiter)
                     for i in range(1, len(parts)):
                         parent = delimiter.join(parts[:i])
                         child = delimiter.join(parts[:i+1])
-                        
+                    
                         if parent in existing_keywords and child in existing_keywords:
-                            parent_id = existing_keywords[parent]['id']
-                            child_id = existing_keywords[child]['id']
-                            
-                            # Update the parent field
-                            cursor.execute(
-                                "UPDATE AgLibraryKeyword SET parent = ? WHERE id_local = ?",
-                                (parent_id, child_id)
-                            )
-                            updated_count += 1
+                            relationships.append((
+                                existing_keywords[parent]['id'],  # parent_id
+                                existing_keywords[child]['id']    # child_id
+                            ))
+            
+                # Update parent relationships in batches
+                relationship_batch_size = 1000
+                for i in range(0, len(relationships), relationship_batch_size):
+                    batch = relationships[i:i+relationship_batch_size]
+                
+                    for parent_id, child_id in batch:
+                        # Update the parent field
+                        cursor.execute(
+                            "UPDATE AgLibraryKeyword SET parent = ? WHERE id_local = ?",
+                            (parent_id, child_id)
+                        )
+                        updated_count += 1
             
             # Purge unused keywords if configured to do so
             if hasattr(self.config, 'purge_unused_keywords') and self.config.purge_unused_keywords:
