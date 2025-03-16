@@ -47,7 +47,7 @@ The Lightroom AI Tool provides several key capabilities to enhance your Lightroo
 
 ## Keyword Consolidator Tool
 
-The `lightroom_ai.cli_keyword_consolidator` is a specialized tool for organizing and structuring keywords in your Lightroom catalog:
+The `lightroom_ai.keyword_consolidator` is a specialized tool for organizing and structuring keywords in your Lightroom catalog:
 
 ### Key Features
 
@@ -65,17 +65,5 @@ The keyword consolidator can be run as a standalone CLI tool to:
 - Improve searchability and organization of your image library
 - Reduce keyword clutter in your catalog
 
-## Installation
+#### Command Line Usage
 
-### Prerequisites
-
-- Python 3.8 or higher
-- Adobe Lightroom Classic (tested with versions 10.0+)
-- API keys for your chosen AI provider (Claude, OpenRouter, or local Ollama setup)
-
-### Install from PyPI
-
-clone this repo
-cd lightroom-ai
-pip install -e .
-lightroom-ai --create-config
