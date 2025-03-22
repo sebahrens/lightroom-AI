@@ -67,6 +67,7 @@ class AppConfig:
     use_id_global: bool = True
     db_busy_timeout: int = 5000
     use_categorical_keywords: bool = False
+    use_freeform_keywords: bool = True  # Added missing attribute
     use_hierarchical_keywords: bool = False
     keyword_delimiter: str = "|"
     categories: Dict[str, List[str]] = field(default_factory=dict)  # Added field for categories
