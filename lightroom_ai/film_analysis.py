@@ -637,8 +637,11 @@ def get_taxonomy_flat_list() -> Dict[str, List[str]]:
         "CE": []   # Contextual Elements codes
     }
     
-    # Visual Subject (VS) codes
+    # Visual Subject (VS) codes - including parent categories
     vs_codes = [
+        "VS1", "VS1.1", "VS1.2", "VS1.3",  # Parent categories
+        "VS2", "VS2.1", "VS2.2",  # Parent categories
+        "VS3", "VS3.1", "VS3.2",  # Parent categories
         "VS1.1.1", "VS1.1.2", "VS1.1.3",  # Individual Portrait
         "VS1.2.1", "VS1.2.2", "VS1.2.3",  # Group
         "VS1.3.1", "VS1.3.2", "VS1.3.3", "VS1.3.4",  # Human Activity
@@ -649,8 +652,11 @@ def get_taxonomy_flat_list() -> Dict[str, List[str]]:
     ]
     taxonomy["VS"] = vs_codes
     
-    # Image Characteristics (IC) codes
+    # Image Characteristics (IC) codes - including parent categories
     ic_codes = [
+        "IC1", "IC1.1", "IC1.2", "IC1.3",  # Parent categories
+        "IC2", "IC2.1", "IC2.2", "IC2.3",  # Parent categories
+        "IC3", "IC3.1", "IC3.2", "IC3.3",  # Parent categories
         "IC1.1.1", "IC1.1.2", "IC1.1.3", "IC1.1.4",  # Frame Arrangement
         "IC1.2.1", "IC1.2.2", "IC1.2.3", "IC1.2.4", "IC1.2.5",  # Perspective
         "IC1.3.1", "IC1.3.2", "IC1.3.3", "IC1.3.4",  # Distance/Scale
@@ -663,8 +669,11 @@ def get_taxonomy_flat_list() -> Dict[str, List[str]]:
     ]
     taxonomy["IC"] = ic_codes
     
-    # Contextual Elements (CE) codes
+    # Contextual Elements (CE) codes - including parent categories
     ce_codes = [
+        "CE1", "CE1.1", "CE1.2", "CE1.3",  # Parent categories
+        "CE2", "CE2.1", "CE2.2",  # Parent categories
+        "CE3", "CE3.1", "CE3.2", "CE3.3",  # Parent categories
         "CE1.1.1", "CE1.1.2", "CE1.1.3", "CE1.1.4", "CE1.1.5",  # Era Identifiers
         "CE1.2.1", "CE1.2.2", "CE1.2.3", "CE1.2.4", "CE1.2.5",  # Time of Day
         "CE1.3.1", "CE1.3.2", "CE1.3.3", "CE1.3.4",  # Seasonal Indicators
