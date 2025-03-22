@@ -69,13 +69,14 @@ class AppConfig:
     use_categorical_keywords: bool = False
     use_hierarchical_keywords: bool = False
     keyword_delimiter: str = "|"
-    categories: List[str] = field(default_factory=list)
+    categories: Dict[str, List[str]] = field(default_factory=dict)  # Added field for categories
+    include_film_analysis: bool = True  # Added field for film analysis
     keyword_consolidation: bool = False
-    keyword_cluster_threshold: float = 0.7  # Similarity threshold for clustering keywords
-    keyword_similarity_threshold: float = 0.92  # Added to match config.json
-    use_llm_grouping: bool = False  # Whether to use LLM for keyword grouping
-    use_llm_clustering: bool = False  # Whether to use LLM for keyword clustering
-    purge_unused_keywords: bool = False  # Whether to purge unused keywords after harmonization
+    keyword_cluster_threshold: float = 0.7
+    keyword_similarity_threshold: float = 0.92
+    use_llm_grouping: bool = False
+    use_llm_clustering: bool = False
+    purge_unused_keywords: bool = False
 
 
 def _substitute_env_vars(value: Any) -> Any:

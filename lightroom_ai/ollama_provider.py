@@ -3,17 +3,14 @@ Ollama-specific implementation of AI provider.
 """
 
 import json
-import re
-import logging
 import requests
-from typing import Dict, Any, Optional, List, Callable
+from typing import Dict, Any, Optional
 
 from .config import AppConfig, OllamaConfig
 from .ai_providers import AiProvider
 from .logging_setup import get_logger
 
 logger = get_logger(__name__)
-
 
 class OllamaProvider(AiProvider):
     """Ollama API implementation of AI provider."""
@@ -41,46 +38,35 @@ class OllamaProvider(AiProvider):
         self.api_url = self.ollama_config.api_url
         self.model = self.ollama_config.model
         
-    def analyze_image(self, image_b64: str) -> Optional[Dict[str, Any]]:
+    def analyze_image(self, image_b64: str, user_prompt: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """
         Analyze an image using Ollama API and extract metadata.
         
         Args:
             image_b64: Base64-encoded image string
+            user_prompt: Optional custom user prompt
             
         Returns:
             Dictionary with analysis results if successful, None otherwise
         """
         def make_request() -> Optional[Dict[str, Any]]:
-            return self._call_ollama_api(image_b64)
+            return self._call_ollama_api(image_b64, user_prompt)
             
         return self.call_with_retries(make_request)
         
-    def _call_ollama_api(self, img_b64: str) -> Optional[Dict[str, Any]]:
+    def _call_ollama_api(self, img_b64: str, user_prompt: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """
         Call the Ollama API with an image to get metadata.
         
         Args:
             img_b64: Base64-encoded image string
+            user_prompt: Optional custom user prompt
             
         Returns:
             Dictionary with analysis results if successful, None otherwise
         """
-        # Prompt for image analysis
-        prompt = """
-        You are a photography assistant specializing in image analysis.
-        Please analyze this base64-encoded image and provide:
-        1. Five keywords that best describe the content (objects, scenes, concepts).
-        2. Five tags that would be useful for categorizing this photo (style, genre, mood).
-        3. An aesthetic score from 0 to 10, where 10 represents exceptional artistic quality.
-        
-        Return ONLY a JSON object with this structure:
-        {
-            "keywords": [...],
-            "tags": [...],
-            "aesthetic_score": ...
-        }
-        """
+        # Get the analysis prompt (either custom or default)
+        prompt = user_prompt if user_prompt else self.get_analysis_prompt()
         
         payload = {
             "model": self.model,
@@ -95,21 +81,14 @@ class OllamaProvider(AiProvider):
             result = response.json()
             response_text = result.get("response", "")
             
-            # Use the shared extraction utility from utils.py
-from lightroom_ai.utils import extract_json
-
-ai_result = extract_json(response_text, logger, self.config.debug_mode)
-if not ai_result:
-    return None
-return ai_result
-
-                
-                return json.loads(json_str)
-            else:
-                logger.error("Failed to extract JSON from Ollama response")
-                if self.config.debug_mode:
-                    logger.debug(f"Ollama response: {response_text}")
+            # Parse the response
+            ai_result = self.parse_response(response_text)
+            if not ai_result:
                 return None
+                
+            # Format the result
+            formatted_result = self.format_result(ai_result)
+            return formatted_result
                 
         except requests.RequestException as e:
             logger.error(f"Ollama API network error: {str(e)}")
