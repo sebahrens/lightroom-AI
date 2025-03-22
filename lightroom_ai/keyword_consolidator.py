@@ -754,9 +754,124 @@ class KeywordConsolidator:
         # If all else fails, use the shortest one
         return min(group, key=len)
     
+    def map_keywords_to_taxonomy(self, keywords: List[str]) -> Dict[str, List[str]]:
+        """
+        Map keywords to taxonomy codes.
+        
+        Args:
+            keywords: List of keywords to map
+            
+        Returns:
+            Dictionary mapping taxonomy categories to lists of codes
+        """
+        from .film_analysis import get_taxonomy_flat_list
+        
+        # Get the flat list of taxonomy codes
+        taxonomy_codes = get_taxonomy_flat_list()
+        
+        # Initialize taxonomy mapping
+        taxonomy_mapping = {
+            "vs": [],  # Visual Subject codes
+            "ic": [],  # Image Characteristics codes
+            "ce": []   # Contextual Elements codes
+        }
+        
+        # Define keyword to taxonomy code mappings
+        keyword_to_vs = {
+            "portrait": ["VS1.1"],
+            "people": ["VS1"],
+            "person": ["VS1"],
+            "group": ["VS1.2"],
+            "crowd": ["VS1.2"],
+            "nature": ["VS2.1"],
+            "landscape": ["VS2.1"],
+            "architecture": ["VS2.2.1"],
+            "building": ["VS2.2.1"],
+            "street": ["VS2.2.3"],
+            "urban": ["VS2.2.3"],
+            "plant": ["VS3.1.1"],
+            "flower": ["VS3.1.1"],
+            "animal": ["VS3.1.2"],
+            "wildlife": ["VS3.1.2"],
+            "object": ["VS3.2"],
+            "item": ["VS3.2"]
+        }
+        
+        keyword_to_ic = {
+            "black & white": ["IC2.1.1"],
+            "bw": ["IC2.1.1"],
+            "b&w": ["IC2.1.1"],
+            "monochrome": ["IC2.1.2"],
+            "color": ["IC2.1.3"],
+            "high contrast": ["IC2.2.1"],
+            "contrasty": ["IC2.2.1"],
+            "low contrast": ["IC2.2.3"],
+            "soft contrast": ["IC2.2.3"],
+            "shallow depth": ["IC2.3.2"],
+            "bokeh": ["IC2.3.2"],
+            "deep depth": ["IC2.3.1"],
+            "sharp": ["IC2.3.1"],
+            "blur": ["IC2.3.4"],
+            "motion blur": ["IC2.3.4"],
+            "warm": ["IC3.1.1"],
+            "warm tone": ["IC3.1.1"],
+            "cool": ["IC3.1.2"],
+            "cool tone": ["IC3.1.2"],
+            "saturated": ["IC3.2.1"],
+            "vibrant": ["IC3.2.1"],
+            "muted": ["IC3.2.3"],
+            "desaturated": ["IC3.2.3"]
+        }
+        
+        keyword_to_ce = {
+            "golden hour": ["CE1.2.3"],
+            "sunset": ["CE1.2.3"],
+            "sunrise": ["CE1.2.3"],
+            "blue hour": ["CE1.2.4"],
+            "twilight": ["CE1.2.4"],
+            "night": ["CE1.2.5"],
+            "dark": ["CE1.2.5"],
+            "documentary": ["CE3.3.1"],
+            "photojournalism": ["CE3.3.1"],
+            "street photography": ["CE3.3.2"],
+            "fine art": ["CE3.3.3"],
+            "artistic": ["CE3.3.3"],
+            "snapshot": ["CE3.3.4"],
+            "casual": ["CE3.3.4"],
+            "experimental": ["CE3.3.5"],
+            "abstract": ["CE3.3.5"]
+        }
+        
+        # Map keywords to taxonomy codes
+        for keyword in keywords:
+            keyword_lower = keyword.lower()
+            
+            # Check Visual Subject mappings
+            for kw, codes in keyword_to_vs.items():
+                if kw in keyword_lower:
+                    for code in codes:
+                        if code in taxonomy_codes["VS"] and code not in taxonomy_mapping["vs"]:
+                            taxonomy_mapping["vs"].append(code)
+            
+            # Check Image Characteristics mappings
+            for kw, codes in keyword_to_ic.items():
+                if kw in keyword_lower:
+                    for code in codes:
+                        if code in taxonomy_codes["IC"] and code not in taxonomy_mapping["ic"]:
+                            taxonomy_mapping["ic"].append(code)
+            
+            # Check Contextual Elements mappings
+            for kw, codes in keyword_to_ce.items():
+                if kw in keyword_lower:
+                    for code in codes:
+                        if code in taxonomy_codes["CE"] and code not in taxonomy_mapping["ce"]:
+                            taxonomy_mapping["ce"].append(code)
+        
+        return taxonomy_mapping
+    
     def cluster_keywords(self) -> Dict[str, List[str]]:
         """
-        Cluster keywords into categories using AI.
+        Cluster keywords into categories using AI and taxonomy.
         
         Returns:
             Dictionary mapping category names to lists of keywords
@@ -773,94 +888,121 @@ class KeywordConsolidator:
             logger.warning(f"Only {len(unique_cleaned_keywords)} unique keywords after normalization, using fallback clustering")
             return self._fallback_clustering(unique_cleaned_keywords)
             
-        logger.info(f"Clustering {len(unique_cleaned_keywords)} normalized keywords using AI...")
+        logger.info(f"Clustering {len(unique_cleaned_keywords)} normalized keywords using AI and taxonomy...")
         
-        # Check if we should use LLM for clustering
-        if hasattr(self.config, 'use_llm_clustering') and self.config.use_llm_clustering:
-            logger.info("Using LLM for keyword clustering")
-            self.keyword_clusters = self._cluster_keywords_with_llm(unique_cleaned_keywords)
-            
-            # Validate the clusters
-            if self._validate_clustering_results(self.keyword_clusters):
-                return self.keyword_clusters
-            else:
-                logger.warning("LLM clustering produced poor results, falling back to traditional clustering")
+        # Map keywords to taxonomy
+        taxonomy_mapping = self.map_keywords_to_taxonomy(unique_cleaned_keywords)
+        logger.info(f"Mapped keywords to taxonomy: VS={len(taxonomy_mapping['vs'])}, IC={len(taxonomy_mapping['ic'])}, CE={len(taxonomy_mapping['ce'])}")
         
-        # If we get here, either LLM clustering is disabled or it failed
-        # If we have too many keywords, split them into batches
-        max_batch_size = 250  # Reduced from 300 to ensure we stay within token limits
+        # Create initial clusters based on taxonomy
+        taxonomy_clusters = {}
         
-        if len(unique_cleaned_keywords) > max_batch_size:
-            logger.info(f"Processing {len(unique_cleaned_keywords)} keywords in batches of {max_batch_size}")
-            self.keyword_clusters = self._process_keywords_in_batches(unique_cleaned_keywords, max_batch_size)
-            return self.keyword_clusters
-        else:
-            # Process all keywords at once
-            prompt = self._get_clustering_prompt(unique_cleaned_keywords)
-            self.keyword_clusters = self._process_clustering_prompt(prompt)
-            return self.keyword_clusters
-    
-    def _cluster_keywords_with_llm(self, keywords: List[str]) -> Dict[str, List[str]]:
-        """
-        Use LLM to cluster keywords into categories.
-        
-        Args:
-            keywords: List of keywords to cluster
-            
-        Returns:
-            Dictionary mapping category names to lists of keywords
-        """
-        # If we have too many keywords, process in batches
-        max_batch_size = 200  # Limit to avoid token limits
-        
-        if len(keywords) > max_batch_size:
-            logger.info(f"Processing {len(keywords)} keywords in batches for LLM clustering")
-            combined_clusters = {}
-            
-            # Process keywords in batches using multiple workers if configured
-            if self.max_workers > 1:
-                batches = [keywords[i:i+max_batch_size] for i in range(0, len(keywords), max_batch_size)]
-                logger.info(f"Processing {len(batches)} batches with up to {self.max_workers} workers")
+        # Visual Subject clusters
+        if taxonomy_mapping['vs']:
+            # People
+            people_keywords = [k for k in unique_cleaned_keywords if any(k.lower() in ["portrait", "people", "person", "group", "crowd"] or w in k.lower() for w in ["portrait", "people", "person", "group", "crowd"])]
+            if people_keywords:
+                taxonomy_clusters["People"] = people_keywords
                 
-                with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-                    future_to_batch = {executor.submit(self._process_llm_clustering_batch, batch): batch for batch in batches}
-                    
-                    for future in concurrent.futures.as_completed(future_to_batch):
-                        batch = future_to_batch[future]
-                        try:
-                            batch_clusters = future.result()
-                            
-                            # Merge with combined results
-                            with self.lock:
-                                for category, words in batch_clusters.items():
-                                    if category in combined_clusters:
-                                        combined_clusters[category].extend(words)
-                                    else:
-                                        combined_clusters[category] = words
-                        except Exception as e:
-                            logger.error(f"Error processing batch: {e}")
+            # Nature
+            nature_keywords = [k for k in unique_cleaned_keywords if any(k.lower() in ["nature", "landscape", "mountain", "forest", "water"] or w in k.lower() for w in ["nature", "landscape", "mountain", "forest", "water"])]
+            if nature_keywords:
+                taxonomy_clusters["Nature"] = nature_keywords
+                
+            # Architecture
+            architecture_keywords = [k for k in unique_cleaned_keywords if any(k.lower() in ["architecture", "building", "structure", "urban", "city"] or w in k.lower() for w in ["architecture", "building", "structure", "urban", "city"])]
+            if architecture_keywords:
+                taxonomy_clusters["Architecture"] = architecture_keywords
+                
+            # Objects
+            object_keywords = [k for k in unique_cleaned_keywords if any(k.lower() in ["object", "item", "thing", "product"] or w in k.lower() for w in ["object", "item", "thing", "product"])]
+            if object_keywords:
+                taxonomy_clusters["Objects"] = object_keywords
+        
+        # Image Characteristics clusters
+        if taxonomy_mapping['ic']:
+            # Style
+            style_keywords = [k for k in unique_cleaned_keywords if any(k.lower() in ["black & white", "monochrome", "high contrast", "low contrast"] or w in k.lower() for w in ["black & white", "monochrome", "high contrast", "low contrast"])]
+            if style_keywords:
+                taxonomy_clusters["Style"] = style_keywords
+                
+            # Color
+            color_keywords = [k for k in unique_cleaned_keywords if any(k.lower() in ["color", "warm", "cool", "saturated", "muted", "vibrant"] or w in k.lower() for w in ["color", "warm", "cool", "saturated", "muted", "vibrant"])]
+            if color_keywords:
+                taxonomy_clusters["Color"] = color_keywords
+                
+            # Technique
+            technique_keywords = [k for k in unique_cleaned_keywords if any(k.lower() in ["focus", "depth of field", "bokeh", "blur", "sharp"] or w in k.lower() for w in ["focus", "depth of field", "bokeh", "blur", "sharp"])]
+            if technique_keywords:
+                taxonomy_clusters["Technique"] = technique_keywords
+        
+        # Contextual Elements clusters
+        if taxonomy_mapping['ce']:
+            # Time
+            time_keywords = [k for k in unique_cleaned_keywords if any(k.lower() in ["golden hour", "blue hour", "night", "sunset", "sunrise", "twilight"] or w in k.lower() for w in ["golden hour", "blue hour", "night", "sunset", "sunrise", "twilight"])]
+            if time_keywords:
+                taxonomy_clusters["Time"] = time_keywords
+                
+            # Genre
+            genre_keywords = [k for k in unique_cleaned_keywords if any(k.lower() in ["documentary", "street photography", "fine art", "snapshot", "experimental"] or w in k.lower() for w in ["documentary", "street photography", "fine art", "snapshot", "experimental"])]
+            if genre_keywords:
+                taxonomy_clusters["Genre"] = genre_keywords
+        
+        # Check if we have a reasonable number of taxonomy-based clusters
+        taxonomy_coverage = sum(len(keywords) for keywords in taxonomy_clusters.values())
+        taxonomy_coverage_ratio = taxonomy_coverage / len(unique_cleaned_keywords) if unique_cleaned_keywords else 0
+        
+        logger.info(f"Created {len(taxonomy_clusters)} taxonomy-based clusters covering {taxonomy_coverage_ratio:.2f} of keywords")
+        
+        # If taxonomy coverage is low, use LLM or traditional clustering
+        if taxonomy_coverage_ratio < 0.5:
+            logger.info("Taxonomy coverage is low, using additional clustering methods")
+            
+            # Get keywords not covered by taxonomy
+            covered_keywords = set()
+            for keywords in taxonomy_clusters.values():
+                covered_keywords.update(keywords)
+            uncovered_keywords = [k for k in unique_cleaned_keywords if k not in covered_keywords]
+            
+            # Check if we should use LLM for clustering
+            if hasattr(self.config, 'use_llm_clustering') and self.config.use_llm_clustering:
+                logger.info(f"Using LLM for clustering {len(uncovered_keywords)} uncovered keywords")
+                llm_clusters = self._cluster_keywords_with_llm(uncovered_keywords)
+                
+                # Merge with taxonomy clusters
+                for category, keywords in llm_clusters.items():
+                    if category in taxonomy_clusters:
+                        taxonomy_clusters[category].extend(keywords)
+                    else:
+                        taxonomy_clusters[category] = keywords
             else:
-                # Process sequentially if max_workers is 1
-                for i in range(0, len(keywords), max_batch_size):
-                    batch = keywords[i:i+max_batch_size]
-                    logger.info(f"Processing batch {i//max_batch_size + 1} with {len(batch)} keywords")
-                    batch_clusters = self._process_llm_clustering_batch(batch)
-                    
-                    # Merge with combined results
-                    for category, words in batch_clusters.items():
-                        if category in combined_clusters:
-                            combined_clusters[category].extend(words)
-                        else:
-                            combined_clusters[category] = words
-            
-            # Remove duplicates in each category
-            for category in combined_clusters:
-                combined_clusters[category] = list(set(combined_clusters[category]))
-            
-            logger.info(f"LLM clustering created {len(combined_clusters)} categories")
-            return combined_clusters
-        else:
-            return self._process_llm_clustering_batch(keywords)
+                # Use traditional clustering
+                logger.info(f"Using traditional clustering for {len(uncovered_keywords)} uncovered keywords")
+                
+                # If we have too many keywords, split them into batches
+                max_batch_size = 250
+                
+                if len(uncovered_keywords) > max_batch_size:
+                    logger.info(f"Processing {len(uncovered_keywords)} keywords in batches of {max_batch_size}")
+                    additional_clusters = self._process_keywords_in_batches(uncovered_keywords, max_batch_size)
+                else:
+                    # Process all keywords at once
+                    prompt = self._get_clustering_prompt(uncovered_keywords)
+                    additional_clusters = self._process_clustering_prompt(prompt)
+                
+                # Merge with taxonomy clusters
+                for category, keywords in additional_clusters.items():
+                    if category in taxonomy_clusters:
+                        taxonomy_clusters[category].extend(keywords)
+                    else:
+                        taxonomy_clusters[category] = keywords
+        
+        # Remove duplicates in each category
+        for category in taxonomy_clusters:
+            taxonomy_clusters[category] = list(set(taxonomy_clusters[category]))
+        
+        self.keyword_clusters = taxonomy_clusters
+        return taxonomy_clusters
     
     def _process_llm_clustering_batch(self, keywords: List[str]) -> Dict[str, List[str]]:
         """
@@ -872,10 +1014,13 @@ class KeywordConsolidator:
         Returns:
             Dictionary mapping category names to lists of keywords
         """
+        # Map keywords to taxonomy
+        taxonomy_mapping = self.map_keywords_to_taxonomy(keywords)
+        
         # Get categories from config or use default
         categories = self.config.categories if hasattr(self.config, 'categories') and self.config.categories else [
-            "Composition", "Lighting", "Subject", "Technique", "Mood", "Color", 
-            "Location", "Time", "Event", "People", "Objects", "Style", "Technical"
+            "People", "Nature", "Architecture", "Objects", "Lighting", "Color", 
+            "Composition", "Style", "Technique", "Mood", "Time", "Location"
         ]
         
         # Format the prompt for the LLM
@@ -891,6 +1036,12 @@ class KeywordConsolidator:
         CATEGORIES:
         {', '.join(categories)}
         
+        TAXONOMY INFORMATION:
+        These keywords map to the following taxonomy codes:
+        - Visual Subject (VS) codes: {', '.join(taxonomy_mapping['vs'])}
+        - Image Characteristics (IC) codes: {', '.join(taxonomy_mapping['ic'])}
+        - Contextual Elements (CE) codes: {', '.join(taxonomy_mapping['ce'])}
+        
         INSTRUCTIONS:
         1. Assign each keyword to the most appropriate category
         2. You may create subcategories within the main categories if needed
@@ -898,6 +1049,7 @@ class KeywordConsolidator:
         4. If a keyword doesn't fit any category well, create an "Other" category
         5. Be consistent with your categorization logic
         6. Consolidate similar terms (e.g., "airplane", "aircraft", "plane" should all be represented by one term)
+        7. Use the taxonomy information to guide your categorization
         
         REQUIRED OUTPUT FORMAT:
         Return ONLY a JSON object where:
@@ -907,9 +1059,9 @@ class KeywordConsolidator:
         
         Example:
         {{
-          "Composition": ["rule of thirds", "symmetry", "balance"],
-          "Composition|Framing": ["frame within frame", "natural frame"],
-          "Lighting": ["backlight", "golden hour", "shadow"]
+          "People": ["portrait", "group", "crowd"],
+          "People|Portrait": ["headshot", "self-portrait"],
+          "Nature": ["landscape", "mountain", "forest"]
         }}
         
         IMPORTANT:
@@ -1089,6 +1241,81 @@ class KeywordConsolidator:
         logger.info(f"Combined results: {len(combined_clusters)} categories")
         return combined_clusters
     
+    def _get_clustering_prompt(self, keywords: List[str]) -> str:
+        """
+        Generate a prompt for the AI to cluster keywords.
+        
+        Args:
+            keywords: List of keywords to cluster
+            
+        Returns:
+            Prompt string for the AI
+        """
+        # Map keywords to taxonomy
+        taxonomy_mapping = self.map_keywords_to_taxonomy(keywords)
+        
+        categories = self.config.categories if hasattr(self.config, 'categories') and self.config.categories else [
+            "People", "Nature", "Architecture", "Objects", "Lighting", "Color", 
+            "Composition", "Style", "Technique", "Mood", "Time", "Location"
+        ]
+        
+        # Sort keywords alphabetically for better processing
+        sorted_keywords = sorted(keywords)
+        
+        prompt = f"""
+        You are a photography expert tasked with organizing keywords into a logical hierarchy.
+        
+        TASK:
+        Analyze these photography keywords and organize them into categories and subcategories.
+        
+        KEYWORDS:
+        {', '.join(sorted_keywords)}
+        
+        TAXONOMY INFORMATION:
+        These keywords map to the following taxonomy codes:
+        - Visual Subject (VS) codes: {', '.join(taxonomy_mapping['vs'])}
+        - Image Characteristics (IC) codes: {', '.join(taxonomy_mapping['ic'])}
+        - Contextual Elements (CE) codes: {', '.join(taxonomy_mapping['ce'])}
+        
+        INSTRUCTIONS:
+        1. Assign EVERY keyword to one of these main categories: {', '.join(categories)}
+        2. Create appropriate subcategories as needed
+        3. Every keyword MUST be assigned to a category - none should be left out
+        4. If a keyword doesn't fit any category well, use your best judgment
+        5. Distribute keywords evenly - don't put too many in one category
+        6. Be consistent with your categorization logic
+        7. Consolidate similar terms (e.g., "airplane", "aircraft", "plane" should all be represented by one term)
+        8. Use the taxonomy information to guide your categorization
+        
+        REQUIRED OUTPUT FORMAT:
+        Return ONLY a JSON object with this structure:
+        {{
+            "Category1": {{
+                "keywords": ["keyword1", "keyword2"],
+                "subcategories": {{
+                    "Subcategory1": {{
+                        "keywords": ["keyword3", "keyword4"]
+                    }}
+                }}
+            }},
+            "Category2": {{
+                "keywords": ["keyword5", "keyword6"]
+            }}
+        }}
+        
+        IMPORTANT:
+        - Include EVERY keyword from the provided list
+        - Use ONLY the main categories listed above
+        - Your response must be valid JSON that can be parsed directly
+        - Do not include any explanations or text outside the JSON structure
+        - Ensure no keyword appears in multiple categories
+        - Make sure all JSON keys and values are properly quoted
+        - Make sure to properly close all brackets and format as valid JSON
+        - Do not use markdown formatting or code blocks
+        """
+        
+        return prompt
+    
     def _process_clustering_prompt(self, prompt: str) -> Dict[str, List[str]]:
         """
         Process a clustering prompt and return the results.
@@ -1156,6 +1383,152 @@ class KeywordConsolidator:
             return False
             
         return True
+    
+    def _call_ai_for_clustering(self, prompt: str) -> Optional[Dict[str, Any]]:
+        """
+        Call the AI provider to cluster keywords.
+        
+        Args:
+            prompt: Prompt for the AI
+            
+        Returns:
+            AI response as a dictionary
+        """
+        try:
+            # Create a dummy image since our AI providers expect an image
+            # This is a 1x1 transparent pixel encoded as base64
+            dummy_image = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
+            
+            # Call the AI provider with the prompt and dummy image
+            response = self.ai_provider.analyze_image(dummy_image, user_prompt=prompt)
+            
+            # Extract the JSON response from the AI
+            if response and 'analysis' in response:
+                # Try to find JSON in the response
+                analysis_text = response['analysis']
+                logger.debug(f"AI response: {analysis_text[:500]}...")
+                
+                # Use our improved JSON extraction method
+                json_data = self._extract_json_object(analysis_text)
+                if json_data:
+                    return json_data
+                
+                # If extract_json fails, try manual extraction
+                try:
+                    # Try to parse directly if it's already JSON
+                    return json.loads(analysis_text)
+                except json.JSONDecodeError:
+                    # Try to extract JSON from text
+                    json_match = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', analysis_text, re.DOTALL)
+                    if json_match:
+                        try:
+                            return json.loads(json_match.group(1))
+                        except json.JSONDecodeError:
+                            logger.error("Failed to parse JSON from AI response")
+                    else:
+                        # Try to find JSON with curly braces
+                        start = analysis_text.find("{")
+                        end = analysis_text.rfind("}")
+                        if start != -1 and end != -1 and end > start:
+                            try:
+                                return json.loads(analysis_text[start:end+1])
+                            except json.JSONDecodeError:
+                                logger.error("Failed to parse JSON from AI response")
+                        else:
+                            logger.error("No JSON found in AI response")
+            
+            # If we have structured_data in the response, try to use that
+            if response and 'structured_data' in response:
+                return response['structured_data']
+                
+            return None
+        except Exception as e:
+            logger.error(f"Error calling AI for clustering: {e}")
+            return None
+    
+    def _parse_clustering_response(self, response: Dict[str, Any]) -> Dict[str, List[str]]:
+        """
+        Parse the AI response to extract keyword clusters.
+        
+        Args:
+            response: AI response as a dictionary
+            
+        Returns:
+            Dictionary mapping category names to lists of keywords
+        """
+        clusters = {}
+        
+        # Try up to 3 times to parse the response
+        for attempt in range(3):
+            try:
+                # Handle different possible response formats
+                if not response:
+                    return {}
+                    
+                # Check if response is already in the simple format we want
+                if all(isinstance(v, list) for v in response.values()):
+                    return response
+                    
+                # Extract analysis text if present
+                analysis_text = response.get('analysis', '')
+                if analysis_text:
+                    # Try to extract JSON from the text
+                    json_data = self._extract_json_object(analysis_text)
+                    if json_data and isinstance(json_data, dict):
+                        response = json_data
+                
+                # Process each top-level category
+                for category, data in response.items():
+                    # Skip non-dictionary values
+                    if not isinstance(data, dict):
+                        if isinstance(data, list):
+                            clusters[category] = data
+                        continue
+                        
+                    # Initialize category
+                    if category not in clusters:
+                        clusters[category] = []
+                        
+                    # Add direct keywords
+                    if 'keywords' in data and isinstance(data['keywords'], list):
+                        clusters[category].extend(data['keywords'])
+                        
+                    # Process subcategories
+                    if 'subcategories' in data and isinstance(data['subcategories'], dict):
+                        for subcategory, subdata in data['subcategories'].items():
+                            full_category = f"{category}{self.config.keyword_delimiter if hasattr(self.config, 'keyword_delimiter') else '|'}{subcategory}"
+                            clusters[full_category] = []
+                            
+                            if isinstance(subdata, dict) and 'keywords' in subdata and isinstance(subdata['keywords'], list):
+                                clusters[full_category].extend(subdata['keywords'])
+                            elif isinstance(subdata, list):
+                                clusters[full_category].extend(subdata)
+                
+                # If we still have no clusters, try to interpret the response differently
+                if not clusters:
+                    # Try to handle a flat list of categories with keywords
+                    for category, value in response.items():
+                        if isinstance(value, list):
+                            clusters[category] = value
+                        elif isinstance(value, str):
+                            # Handle case where keywords are comma-separated strings
+                            clusters[category] = [k.strip() for k in value.split(',') if k.strip()]
+                
+                # If we have clusters, return them
+                if clusters:
+                    return clusters
+                
+                # If we get here, parsing failed
+                logger.warning(f"Failed to parse clustering response (attempt {attempt+1})")
+                time.sleep(1)  # Wait before retrying
+                
+            except Exception as e:
+                logger.error(f"Error parsing clustering response (attempt {attempt+1}): {e}")
+                time.sleep(1)  # Wait before retrying
+        
+        # If we get here, all parsing attempts failed
+        logger.error("Failed to parse clustering response after multiple attempts")
+        return {}
     
     def _fallback_clustering(self, keywords: List[str]) -> Dict[str, List[str]]:
         """
@@ -1316,224 +1689,15 @@ class KeywordConsolidator:
         logger.info(f"Created {len(result)} keyword clusters using fallback method")
         return result
     
-    def _get_clustering_prompt(self, keywords: List[str]) -> str:
-        """
-        Generate a prompt for the AI to cluster keywords.
-        
-        Args:
-            keywords: List of keywords to cluster
-            
-        Returns:
-            Prompt string for the AI
-        """
-        categories = self.config.categories if hasattr(self.config, 'categories') and self.config.categories else [
-            "Composition", "Lighting", "Subject", "Technique", "Mood", "Color", 
-            "Location", "Time", "Event", "People", "Objects", "Style", "Technical"
-        ]
-        
-        # Sort keywords alphabetically for better processing
-        sorted_keywords = sorted(keywords)
-        
-        prompt = f"""
-        You are a photography expert tasked with organizing keywords into a logical hierarchy.
-        
-        TASK:
-        Analyze these photography keywords and organize them into categories and subcategories.
-        
-        KEYWORDS:
-        {', '.join(sorted_keywords)}
-        
-        INSTRUCTIONS:
-        1. Assign EVERY keyword to one of these main categories: {', '.join(categories)}
-        2. Create appropriate subcategories as needed
-        3. Every keyword MUST be assigned to a category - none should be left out
-        4. If a keyword doesn't fit any category well, use your best judgment
-        5. Distribute keywords evenly - don't put too many in one category
-        6. Be consistent with your categorization logic
-        7. Consolidate similar terms (e.g., "airplane", "aircraft", "plane" should all be represented by one term)
-        
-        REQUIRED OUTPUT FORMAT:
-        Return ONLY a JSON object with this structure:
-        {{
-            "Category1": {{
-                "keywords": ["keyword1", "keyword2"],
-                "subcategories": {{
-                    "Subcategory1": {{
-                        "keywords": ["keyword3", "keyword4"]
-                    }}
-                }}
-            }},
-            "Category2": {{
-                "keywords": ["keyword5", "keyword6"]
-            }}
-        }}
-        
-        IMPORTANT:
-        - Include EVERY keyword from the provided list
-        - Use ONLY the main categories listed above
-        - Your response must be valid JSON that can be parsed directly
-        - Do not include any explanations or text outside the JSON structure
-        - Ensure no keyword appears in multiple categories
-        - Make sure all JSON keys and values are properly quoted
-        - Make sure to properly close all brackets and format as valid JSON
-        - Do not use markdown formatting or code blocks
-        """
-        
-        return prompt
-    
-    def _call_ai_for_clustering(self, prompt: str) -> Optional[Dict[str, Any]]:
-        """
-        Call the AI provider to cluster keywords.
-        
-        Args:
-            prompt: Prompt for the AI
-            
-        Returns:
-            AI response as a dictionary
-        """
-        try:
-            # Create a dummy image since our AI providers expect an image
-            # This is a 1x1 transparent pixel encoded as base64
-            dummy_image = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
-            
-            # Call the AI provider with the prompt and dummy image
-            response = self.ai_provider.analyze_image(dummy_image, user_prompt=prompt)
-            
-            # Extract the JSON response from the AI
-            if response and 'analysis' in response:
-                # Try to find JSON in the response
-                analysis_text = response['analysis']
-                logger.debug(f"AI response: {analysis_text[:500]}...")
-                
-                # Use our improved JSON extraction method
-                json_data = self._extract_json_object(analysis_text)
-                if json_data:
-                    return json_data
-                
-                # If extract_json fails, try manual extraction
-                try:
-                    # Try to parse directly if it's already JSON
-                    return json.loads(analysis_text)
-                except json.JSONDecodeError:
-                    # Try to extract JSON from text
-                    json_match = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', analysis_text, re.DOTALL)
-                    if json_match:
-                        try:
-                            return json.loads(json_match.group(1))
-                        except json.JSONDecodeError:
-                            logger.error("Failed to parse JSON from AI response")
-                    else:
-                        # Try to find JSON with curly braces
-                        start = analysis_text.find("{")
-                        end = analysis_text.rfind("}")
-                        if start != -1 and end != -1 and end > start:
-                            try:
-                                return json.loads(analysis_text[start:end+1])
-                            except json.JSONDecodeError:
-                                logger.error("Failed to parse JSON from AI response")
-                        else:
-                            logger.error("No JSON found in AI response")
-            
-            # If we have structured_data in the response, try to use that
-            if response and 'structured_data' in response:
-                return response['structured_data']
-                
-            return None
-        except Exception as e:
-            logger.error(f"Error calling AI for clustering: {e}")
-            return None
-    
-    def _parse_clustering_response(self, response: Dict[str, Any]) -> Dict[str, List[str]]:
-        """
-        Parse the AI response to extract keyword clusters.
-        
-        Args:
-            response: AI response as a dictionary
-            
-        Returns:
-            Dictionary mapping category names to lists of keywords
-        """
-        clusters = {}
-        
-        # Try up to 3 times to parse the response
-        for attempt in range(3):
-            try:
-                # Handle different possible response formats
-                if not response:
-                    return {}
-                    
-                # Check if response is already in the simple format we want
-                if all(isinstance(v, list) for v in response.values()):
-                    return response
-                    
-                # Extract analysis text if present
-                analysis_text = response.get('analysis', '')
-                if analysis_text:
-                    # Try to extract JSON from the text
-                    json_data = self._extract_json_object(analysis_text)
-                    if json_data and isinstance(json_data, dict):
-                        response = json_data
-                
-                # Process each top-level category
-                for category, data in response.items():
-                    # Skip non-dictionary values
-                    if not isinstance(data, dict):
-                        if isinstance(data, list):
-                            clusters[category] = data
-                        continue
-                        
-                    # Initialize category
-                    if category not in clusters:
-                        clusters[category] = []
-                        
-                    # Add direct keywords
-                    if 'keywords' in data and isinstance(data['keywords'], list):
-                        clusters[category].extend(data['keywords'])
-                        
-                    # Process subcategories
-                    if 'subcategories' in data and isinstance(data['subcategories'], dict):
-                        for subcategory, subdata in data['subcategories'].items():
-                            full_category = f"{category}{self.config.keyword_delimiter if hasattr(self.config, 'keyword_delimiter') else '|'}{subcategory}"
-                            clusters[full_category] = []
-                            
-                            if isinstance(subdata, dict) and 'keywords' in subdata and isinstance(subdata['keywords'], list):
-                                clusters[full_category].extend(subdata['keywords'])
-                            elif isinstance(subdata, list):
-                                clusters[full_category].extend(subdata)
-                
-                # If we still have no clusters, try to interpret the response differently
-                if not clusters:
-                    # Try to handle a flat list of categories with keywords
-                    for category, value in response.items():
-                        if isinstance(value, list):
-                            clusters[category] = value
-                        elif isinstance(value, str):
-                            # Handle case where keywords are comma-separated strings
-                            clusters[category] = [k.strip() for k in value.split(',') if k.strip()]
-                
-                # If we have clusters, return them
-                if clusters:
-                    return clusters
-                
-                # If we get here, parsing failed
-                logger.warning(f"Failed to parse clustering response (attempt {attempt+1})")
-                time.sleep(1)  # Wait before retrying
-                
-            except Exception as e:
-                logger.error(f"Error parsing clustering response (attempt {attempt+1}): {e}")
-                time.sleep(1)  # Wait before retrying
-        
-        # If we get here, all parsing attempts failed
-        logger.error("Failed to parse clustering response after multiple attempts")
-        return {}
-    
     def create_hierarchical_keywords(self) -> Dict[str, str]:
         """
-        Create hierarchical keywords mapping.
+        Create hierarchical keywords mapping using the taxonomy structure.
         
         Returns:
             Dictionary mapping original keywords to hierarchical keywords
         """
+        from .film_analysis import get_taxonomy_structure
+        
         # First clean and normalize keywords if not already done
         if not self.cleaned_keywords:
             self.clean_and_normalize_keywords()
@@ -1542,15 +1706,76 @@ class KeywordConsolidator:
         if not self.keyword_clusters:
             self.cluster_keywords()
             
+        # Get the taxonomy structure
+        taxonomy = get_taxonomy_structure()
+        
         # Create mapping from normalized keyword to hierarchical path
         normalized_to_hierarchy = {}
         
         # Default delimiter if not specified in config
         delimiter = self.config.keyword_delimiter if hasattr(self.config, 'keyword_delimiter') else '|'
         
+        # Map keywords to taxonomy codes
+        unique_keywords = list(set(self.cleaned_keywords.values()))
+        taxonomy_mapping = self.map_keywords_to_taxonomy(unique_keywords)
+        
+        # First, create hierarchical paths based on taxonomy
+        for keyword in unique_keywords:
+            # Map this keyword to taxonomy codes
+            keyword_mapping = self.map_keywords_to_taxonomy([keyword])
+            
+            # If we have VS codes, create a Visual Subject hierarchy
+            if keyword_mapping['vs']:
+                for code in keyword_mapping['vs']:
+                    # Get the hierarchy for this code
+                    if code.startswith("VS1"):  # People
+                        if code.startswith("VS1.1"):  # Individual Portrait
+                            normalized_to_hierarchy[keyword] = f"People{delimiter}Portrait{delimiter}{keyword}"
+                        elif code.startswith("VS1.2"):  # Group
+                            normalized_to_hierarchy[keyword] = f"People{delimiter}Group{delimiter}{keyword}"
+                        else:
+                            normalized_to_hierarchy[keyword] = f"People{delimiter}{keyword}"
+                    elif code.startswith("VS2"):  # Place
+                        if code.startswith("VS2.1"):  # Natural Environment
+                            normalized_to_hierarchy[keyword] = f"Nature{delimiter}Landscape{delimiter}{keyword}"
+                        elif code.startswith("VS2.2"):  # Built Environment
+                            normalized_to_hierarchy[keyword] = f"Architecture{delimiter}{keyword}"
+                        else:
+                            normalized_to_hierarchy[keyword] = f"Place{delimiter}{keyword}"
+                    elif code.startswith("VS3"):  # Objects
+                        normalized_to_hierarchy[keyword] = f"Objects{delimiter}{keyword}"
+            
+            # If we have IC codes, create an Image Characteristics hierarchy
+            elif keyword_mapping['ic']:
+                for code in keyword_mapping['ic']:
+                    if code.startswith("IC2.1"):  # Tonality
+                        normalized_to_hierarchy[keyword] = f"Style{delimiter}Tonality{delimiter}{keyword}"
+                    elif code.startswith("IC2.2"):  # Contrast
+                        normalized_to_hierarchy[keyword] = f"Style{delimiter}Contrast{delimiter}{keyword}"
+                    elif code.startswith("IC2.3"):  # Focus
+                        normalized_to_hierarchy[keyword] = f"Technique{delimiter}Focus{delimiter}{keyword}"
+                    elif code.startswith("IC3.1"):  # Color Temperature
+                        normalized_to_hierarchy[keyword] = f"Color{delimiter}Temperature{delimiter}{keyword}"
+                    elif code.startswith("IC3.2"):  # Color Saturation
+                        normalized_to_hierarchy[keyword] = f"Color{delimiter}Saturation{delimiter}{keyword}"
+                    else:
+                        normalized_to_hierarchy[keyword] = f"Style{delimiter}{keyword}"
+            
+            # If we have CE codes, create a Contextual Elements hierarchy
+            elif keyword_mapping['ce']:
+                for code in keyword_mapping['ce']:
+                    if code.startswith("CE1.2"):  # Time of Day
+                        normalized_to_hierarchy[keyword] = f"Time{delimiter}TimeOfDay{delimiter}{keyword}"
+                    elif code.startswith("CE3.3"):  # Photographic Genre
+                        normalized_to_hierarchy[keyword] = f"Style{delimiter}Genre{delimiter}{keyword}"
+                    else:
+                        normalized_to_hierarchy[keyword] = f"Context{delimiter}{keyword}"
+        
+        # For keywords not mapped to taxonomy, use the cluster-based hierarchy
         for category, keywords in self.keyword_clusters.items():
             for keyword in keywords:
-                normalized_to_hierarchy[keyword] = f"{category}{delimiter}{keyword}"
+                if keyword not in normalized_to_hierarchy:
+                    normalized_to_hierarchy[keyword] = f"{category}{delimiter}{keyword}"
         
         # Check if any normalized keywords were not assigned to categories
         unassigned_keywords = set(self.cleaned_keywords.values()) - set(normalized_to_hierarchy.keys())
