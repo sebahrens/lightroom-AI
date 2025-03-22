@@ -162,9 +162,9 @@ Please follow these steps to complete your analysis:
        }
      },
      "taxonomy": {
-       "vs": ["List of relevant Visual Subject codes"],
-       "ic": ["List of relevant Image Characteristics codes"],
-       "ce": ["List of relevant Contextual Elements codes"]
+       "VS": ["List of relevant Visual Subject codes"],
+       "IC": ["List of relevant Image Characteristics codes"],
+       "CE": ["List of relevant Contextual Elements codes"]
      }
    }
    ```
@@ -692,12 +692,17 @@ def validate_taxonomy_codes(analysis_result: Dict[str, Any]) -> Tuple[bool, Opti
     taxonomy = analysis_result.get("taxonomy", {})
     
     for category, codes in taxonomy.items():
-        if category not in valid_codes:
+        # Convert category to uppercase for case-insensitive comparison
+        category_upper = category.upper()
+        
+        if category_upper not in valid_codes:
             return False, f"Invalid taxonomy category: {category}. Valid categories are: {', '.join(valid_codes.keys())}"
         
         # Check that all codes in the category are valid
         for code in codes:
-            if code not in valid_codes[category]:
+            # Convert code to uppercase for case-insensitive comparison
+            code_upper = code.upper()
+            if code_upper not in valid_codes[category_upper]:
                 return False, f"Invalid taxonomy code: {code} in category {category}"
     
     return True, None
