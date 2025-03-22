@@ -70,6 +70,7 @@ class AppConfig:
     use_hierarchical_keywords: bool = False
     keyword_delimiter: str = "|"
     categories: Dict[str, List[str]] = field(default_factory=dict)  # Added field for categories
+    keyword_categories: Dict[str, List[str]] = field(default_factory=dict)  # Alias for categories
     include_film_analysis: bool = True  # Added field for film analysis
     keyword_consolidation: bool = False
     keyword_cluster_threshold: float = 0.7
@@ -203,8 +204,16 @@ def load_config(config_path: str) -> AppConfig:
         if 'keyword_similarity_threshold' in config_dict:
             config_dict['keyword_cluster_threshold'] = config_dict.pop('keyword_similarity_threshold')
         
+        # Handle keyword_categories if present (map to categories)
+        if 'keyword_categories' in config_dict:
+            config_dict['categories'] = config_dict.pop('keyword_categories')
+        
         # Create main config with remaining fields
         app_config = AppConfig(provider=provider_config, **config_dict)
+        
+        # Ensure categories and keyword_categories are the same object
+        app_config.keyword_categories = app_config.categories
+        
         return app_config
         
     except (json.JSONDecodeError, IOError) as e:
@@ -250,6 +259,10 @@ def save_config(config: AppConfig, config_path: str) -> None:
         # Use keyword_similarity_threshold in the output for backward compatibility
         if 'keyword_cluster_threshold' in config_dict:
             config_dict['keyword_similarity_threshold'] = config_dict.pop('keyword_cluster_threshold')
+        
+        # Remove keyword_categories from output to avoid duplication
+        if 'keyword_categories' in config_dict:
+            config_dict.pop('keyword_categories')
         
         with open(config_path, 'w') as f:
             json.dump(config_dict, f, indent=2)
