@@ -99,6 +99,18 @@ def parse_arguments() -> argparse.Namespace:
         help="Perform detailed database analysis"
     )
     
+    parser.add_argument(
+        "--use-freeform-keywords",
+        action="store_true",
+        help="Use free-form keywords from AI"
+    )
+    
+    parser.add_argument(
+        "--no-freeform-keywords",
+        action="store_true",
+        help="Don't use free-form keywords from AI"
+    )
+    
     return parser.parse_args()
 
 
@@ -124,6 +136,10 @@ def process_arguments(args: argparse.Namespace, config: AppConfig) -> AppConfig:
         config.max_workers = args.max_workers
     if args.max_images:
         config.max_images = args.max_images
+    if args.use_freeform_keywords:
+        config.use_freeform_keywords = True
+    if args.no_freeform_keywords:
+        config.use_freeform_keywords = False
         
     return config
 
@@ -157,6 +173,7 @@ def run_cli() -> int:
         logger.info(f"Parallelization: {config.max_workers} workers")
         logger.info(f"Batch size: {config.batch_size} images")
         logger.info(f"Max images: {config.max_images or 'unlimited'}")
+        logger.info(f"Free-form keywords: {'enabled' if config.use_freeform_keywords else 'disabled'}")
         
         # Check if catalog exists
         if not os.path.exists(args.catalog_path):
