@@ -65,7 +65,7 @@ class AppConfig:
     known_preview_patterns: List[str] = field(default_factory=list)
     use_preview_db: bool = True
     use_id_global: bool = True
-    db_busy_timeout: int = 5000
+    db_busy_timeout: int = 30000  # Increased from 5000 to 30000 (30 seconds)
     use_categorical_keywords: bool = False
     use_freeform_keywords: bool = False  # Changed from True to False
     use_hierarchical_keywords: bool = True  # Changed from False to True
