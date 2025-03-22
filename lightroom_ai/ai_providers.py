@@ -8,7 +8,7 @@ import time
 
 from .config import AppConfig
 from .logging_setup import get_logger
-from .prompt_templates import get_image_analysis_prompt, get_default_categories, format_analysis_result
+from .prompt_templates import get_image_analysis_prompt, format_analysis_result
 from .utils import extract_json
 
 logger = get_logger(__name__)
@@ -53,9 +53,6 @@ class AiProvider(ABC):
         self.config = config
         self.max_retries = config.max_retries
         
-        # Get categories from config or use defaults
-        self.categories = getattr(config, 'categories', get_default_categories())
-        
         # Whether to include film analysis in prompts
         self.include_film_analysis = getattr(config, 'include_film_analysis', True)
     
@@ -94,7 +91,7 @@ class AiProvider(ABC):
         Returns:
             Formatted prompt string
         """
-        return get_image_analysis_prompt(self.categories, self.include_film_analysis)
+        return get_image_analysis_prompt(self.include_film_analysis)
     
     def format_result(self, raw_result: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -106,7 +103,7 @@ class AiProvider(ABC):
         Returns:
             Formatted result dictionary
         """
-        return format_analysis_result(raw_result, self.categories)
+        return format_analysis_result(raw_result)
     
     def parse_response(self, response_text: str) -> Optional[Dict[str, Any]]:
         """

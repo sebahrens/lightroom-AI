@@ -151,7 +151,7 @@ def run_cli() -> int:
         # Log system information
         logger.info(f"Python version: {sys.version}")
         logger.info(f"Platform: {sys.platform}")
-        logger.info(f"Using AI provider: {getattr(config.provider, 'provider_type', 'unknown')}")
+        logger.info(f"Using AI provider: {getattr(config.provider, 'provider_type', 'unknown')} with film analysis taxonomy")
         logger.info(f"Debug mode: {'enabled' if config.debug_mode else 'disabled'}")
         logger.info(f"Smart previews: {'enabled' if config.use_smart_previews else 'disabled'}")
         logger.info(f"Parallelization: {config.max_workers} workers")

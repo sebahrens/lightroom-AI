@@ -3,141 +3,29 @@ Shared prompt templates for AI providers.
 """
 
 from typing import Dict, List, Any, Optional
+from .film_analysis import get_json_image_analysis_prompt, validate_taxonomy_codes, get_taxonomy_structure
+from .logging_setup import get_logger
 
-def get_image_analysis_prompt(categories: Dict[str, List[str]], include_film_analysis: bool = True) -> str:
+logger = get_logger(__name__)
+
+def get_image_analysis_prompt(include_film_analysis: bool = True) -> str:
     """
-    Generate a standardized image analysis prompt with the given categories.
+    Generate a standardized image analysis prompt for film photography.
     
     Args:
-        categories: Dictionary mapping category names to lists of allowed values
         include_film_analysis: Whether to include film-specific analysis instructions
         
     Returns:
         Formatted prompt string
     """
-    # Start with the base prompt
-    prompt = """Please analyze this photograph and categorize it according to these predefined categories.
+    return get_json_image_analysis_prompt(include_film_analysis)
 
-"""
-    # Add each category with its allowed values
-    for category, values in categories.items():
-        if values:
-            # Format category name for display (e.g., 'film_format' → 'FILM FORMAT')
-            category_display = category.replace('_', ' ').upper()
-            
-            # Customize instructions based on category
-            if category == 'film_format':
-                prompt += f"{category_display} (select the 1 most likely match):\n"
-            elif category in ['film_characteristics', 'lens_characteristics', 'focal_length', 'aperture']:
-                prompt += f"{category_display} (select up to 3 that apply):\n"
-            else:
-                prompt += f"{category_display} (select up to 2 best matches):\n"
-            
-            prompt += f"{', '.join(values)}\n\n"
-    
-    # Add film-specific instructions if requested
-    if include_film_analysis:
-        prompt += """
-For FILM FORMAT analysis, consider:
-- If the image has a 3:2 aspect ratio with distinctive 35mm grain pattern, select "35mm"
-- If it has a square or near-square format (6x6), select "120-6x6"
-- If it's rectangular but wider than 35mm (6x4.5, 6x7, 6x9), select the appropriate 120 format
-- Look for film border edges, sprocket holes, or frame numbers that might be visible
-
-For LENS CHARACTERISTICS, consider:
-- Perspective distortion (wide-angle vs. telephoto compression)
-- Depth of field and bokeh qualities (lens speed indicators)
-- Sharpness, contrast, and rendering characteristics
-- Any distinctive lens signatures (swirly bokeh, particular flare patterns)
-"""
-
-    # Add aesthetic score instructions
-    prompt += """
-Also provide an aesthetic score from 0 to 10, where 10 represents exceptional artistic quality.
-
-Return ONLY a JSON object with this structure:
-{
-"""
-    
-    # Add each category to the requested JSON structure
-    for category in categories.keys():
-        prompt += f'  "{category}": [...],\n'
-        
-    prompt += """  "keywords": [...],
-  "tags": [...],
-  "aesthetic_score": ...
-}
-
-IMPORTANT:
-1. For each category, select ONLY from the provided values
-2. If a category doesn't apply, include an empty array
-3. Do not create new categories or values
-4. Include 5-10 general keywords in the "keywords" field
-5. Include 5-10 style/mood tags in the "tags" field
-6. Respond with valid JSON only
-"""
-    
-    return prompt
-
-def get_default_categories() -> Dict[str, List[str]]:
-    """
-    Get the default set of categories and their allowed values.
-    
-    Returns:
-        Dictionary mapping category names to lists of allowed values
-    """
-    return {
-        "film_format": [
-            "35mm", "120-6x4.5", "120-6x6", "120-6x7", "120-6x9", "4x5", "8x10", "digital"
-        ],
-        "film_characteristics": [
-            "color", "black & white", "fine grain", "medium grain", "coarse grain", 
-            "high contrast", "low contrast", "neutral", "saturated", "muted"
-        ],
-        "lens_characteristics": [
-            "sharp", "soft", "bokeh", "distortion", "vignetting", "flare", 
-            "chromatic aberration", "high contrast", "low contrast"
-        ],
-        "focal_length": [
-            "ultra-wide", "wide", "normal", "telephoto", "super-telephoto"
-        ],
-        "aperture": [
-            "wide open", "shallow depth of field", "medium depth of field", "deep depth of field", 
-            "f/1.4", "f/2", "f/2.8", "f/4", "f/5.6", "f/8", "f/11", "f/16", "f/22"
-        ],
-        "content_type": [
-            "portrait", "landscape", "street", "architecture", "still life", 
-            "abstract", "documentary", "wildlife", "macro", "night", "aerial"
-        ],
-        "main_subject": [
-            "person", "group", "building", "nature", "animal", "plant", 
-            "object", "vehicle", "pattern", "texture"
-        ],
-        "lighting": [
-            "natural", "artificial", "bright", "dark", "backlit", "side-lit", 
-            "front-lit", "soft", "harsh", "high-key", "low-key", "golden hour", "blue hour"
-        ],
-        "color": [
-            "vibrant", "muted", "monochrome", "warm", "cool", "complementary", 
-            "analogous", "pastel", "saturated", "desaturated"
-        ],
-        "mood": [
-            "happy", "sad", "peaceful", "energetic", "mysterious", "romantic", 
-            "dramatic", "nostalgic", "tense", "serene", "melancholic"
-        ],
-        "style": [
-            "documentary", "fine art", "commercial", "editorial", "minimalist", 
-            "experimental", "vintage", "modern", "classic", "surreal"
-        ]
-    }
-
-def format_analysis_result(raw_result: Dict[str, Any], categories: Dict[str, List[str]]) -> Dict[str, Any]:
+def format_analysis_result(raw_result: Dict[str, Any]) -> Dict[str, Any]:
     """
     Format the AI analysis result into a standardized structure.
     
     Args:
-        raw_result: Raw AI result with categories
-        categories: Dictionary of allowed categories
+        raw_result: Raw AI result with taxonomy and aesthetic evaluation
         
     Returns:
         Formatted result compatible with the application
@@ -147,40 +35,135 @@ def format_analysis_result(raw_result: Dict[str, Any], categories: Dict[str, Lis
         "keywords": [],
         "tags": [],
         "aesthetic_score": 0,
-        "categories": {}
+        "categories": {},
+        "taxonomy": {},
+        "detailed_evaluation": {}
     }
     
     # Extract aesthetic score
-    if "aesthetic_score" in raw_result:
+    if "aesthetic_evaluation" in raw_result and "overall_rating" in raw_result["aesthetic_evaluation"]:
         try:
-            score = float(raw_result["aesthetic_score"])
+            score = float(raw_result["aesthetic_evaluation"]["overall_rating"]["score"])
             formatted_result["aesthetic_score"] = min(max(score, 0), 10)  # Clamp between 0-10
-        except (ValueError, TypeError):
-            pass
+        except (ValueError, TypeError, KeyError):
+            logger.warning("Could not extract aesthetic score from analysis result")
     
-    # Extract keywords and tags if provided directly
-    if "keywords" in raw_result and isinstance(raw_result["keywords"], list):
-        formatted_result["keywords"] = raw_result["keywords"]
+    # Extract taxonomy information
+    if "taxonomy" in raw_result:
+        formatted_result["taxonomy"] = raw_result["taxonomy"]
+        
+        # Generate keywords and tags from taxonomy codes
+        vs_codes = raw_result["taxonomy"].get("vs", [])
+        ic_codes = raw_result["taxonomy"].get("ic", [])
+        ce_codes = raw_result["taxonomy"].get("ce", [])
+        
+        # Map Visual Subject codes to keywords
+        keyword_mapping = {
+            "VS1.1": "portrait",
+            "VS1.2": "group",
+            "VS1.3": "people",
+            "VS2.1": "nature",
+            "VS2.2": "architecture",
+            "VS3.1.1": "plant",
+            "VS3.1.2": "animal",
+            "VS3.2": "object"
+        }
+        
+        for code in vs_codes:
+            for prefix, keyword in keyword_mapping.items():
+                if code.startswith(prefix) and keyword not in formatted_result["keywords"]:
+                    formatted_result["keywords"].append(keyword)
+        
+        # Map Image Characteristics to tags
+        ic_tag_mapping = {
+            "IC2.1.1": "black & white",
+            "IC2.1.2": "monochrome",
+            "IC2.2.1": "high contrast",
+            "IC2.2.3": "low contrast",
+            "IC3.1.1": "warm",
+            "IC3.1.2": "cool",
+            "IC3.2.1": "saturated",
+            "IC3.2.3": "muted"
+        }
+        
+        for code in ic_codes:
+            if code in ic_tag_mapping and ic_tag_mapping[code] not in formatted_result["tags"]:
+                formatted_result["tags"].append(ic_tag_mapping[code])
+        
+        # Map Contextual Elements to tags
+        ce_tag_mapping = {
+            "CE1.2.3": "golden hour",
+            "CE1.2.4": "blue hour",
+            "CE1.2.5": "night",
+            "CE3.3.1": "documentary",
+            "CE3.3.2": "street",
+            "CE3.3.3": "fine art",
+            "CE3.3.4": "snapshot",
+            "CE3.3.5": "experimental"
+        }
+        
+        for code in ce_codes:
+            if code in ce_tag_mapping and ce_tag_mapping[code] not in formatted_result["tags"]:
+                formatted_result["tags"].append(ce_tag_mapping[code])
+        
+        # Map to categories structure for compatibility with existing code
+        formatted_result["categories"] = {
+            "film_format": [],
+            "film_characteristics": [],
+            "lens_characteristics": [],
+            "focal_length": [],
+            "aperture": [],
+            "content_type": [],
+            "main_subject": [],
+            "lighting": [],
+            "color": [],
+            "mood": [],
+            "style": []
+        }
+        
+        # Film format
+        if any(code.startswith("CE3.2") for code in ce_codes):
+            if "CE3.2.1" in ce_codes:  # Square Format
+                formatted_result["categories"]["film_format"].append("120-6x6")
+            elif "CE3.2.2" in ce_codes:  # Rectangular (3:2)
+                formatted_result["categories"]["film_format"].append("35mm")
+            elif "CE3.2.4" in ce_codes:  # Panoramic
+                formatted_result["categories"]["film_format"].append("120-6x9")
+        
+        # Film characteristics
+        if "IC2.1.1" in ic_codes:  # Black & White
+            formatted_result["categories"]["film_characteristics"].append("black & white")
+        elif "IC2.1.3" in ic_codes:  # Color Image
+            formatted_result["categories"]["film_characteristics"].append("color")
+        
+        if "IC2.2.1" in ic_codes:  # High Contrast
+            formatted_result["categories"]["film_characteristics"].append("high contrast")
+        elif "IC2.2.3" in ic_codes:  # Low/Soft Contrast
+            formatted_result["categories"]["film_characteristics"].append("low contrast")
+        
+        # Content type
+        if any(code.startswith("VS1.1") for code in vs_codes):  # Individual Portrait
+            formatted_result["categories"]["content_type"].append("portrait")
+        if any(code.startswith("VS2.1") for code in vs_codes):  # Natural Environment
+            formatted_result["categories"]["content_type"].append("landscape")
+        if "VS2.2.3" in vs_codes:  # Urban Street
+            formatted_result["categories"]["content_type"].append("street")
+        if any(code.startswith("VS2.2.1") for code in vs_codes):  # Exterior Architecture
+            formatted_result["categories"]["content_type"].append("architecture")
+        if "CE3.3.1" in ce_codes:  # Documentary
+            formatted_result["categories"]["content_type"].append("documentary")
     
-    if "tags" in raw_result and isinstance(raw_result["tags"], list):
-        formatted_result["tags"] = raw_result["tags"]
+    # Extract detailed evaluation
+    if "detailed_evaluation" in raw_result:
+        formatted_result["detailed_evaluation"] = raw_result["detailed_evaluation"]
     
-    # Process each category
-    for category in categories.keys():
-        # Get values for this category, ensuring they're from the allowed list
-        if category in raw_result and isinstance(raw_result[category], list):
-            # Filter to only include allowed values
-            allowed_values = set(categories[category])
-            valid_values = [v for v in raw_result[category] if v in allowed_values]
-            
-            # Store in the formatted result
-            formatted_result["categories"][category] = valid_values
-            
-            # If keywords/tags weren't provided directly, build them from categories
-            if not formatted_result["keywords"] and category in ["content_type", "main_subject"]:
-                formatted_result["keywords"].extend(valid_values)
-            
-            if not formatted_result["tags"] and category in ["style", "mood", "color"]:
-                formatted_result["tags"].extend(valid_values)
+    # Extract aesthetic evaluation
+    if "aesthetic_evaluation" in raw_result:
+        formatted_result["aesthetic_evaluation"] = raw_result["aesthetic_evaluation"]
+    
+    # Validate the taxonomy codes
+    is_valid, error_message = validate_taxonomy_codes(raw_result)
+    if not is_valid:
+        logger.warning(f"Invalid taxonomy codes in analysis result: {error_message}")
     
     return formatted_result

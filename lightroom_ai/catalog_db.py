@@ -220,7 +220,7 @@ class CatalogDatabase:
         """
         keywords = ai_metadata.get('keywords', [])
         tags = ai_metadata.get('tags', [])
-        categories = ai_metadata.get('categories', {})
+        taxonomy = ai_metadata.get('taxonomy', {})
         aesthetic_score = ai_metadata.get('aesthetic_score', 0)
 
         all_keywords = keywords + tags + ["AI_Processed"]
@@ -229,44 +229,78 @@ class CatalogDatabase:
         score_keyword = f"AI_Score_{aesthetic_score:.1f}"
         all_keywords.append(score_keyword)
 
-        # If hierarchical keywords are enabled, add them
-        if self.use_hierarchical_keywords and categories:
+        # If hierarchical keywords are enabled, add them from taxonomy
+        if self.use_hierarchical_keywords and taxonomy:
             delimiter = self.keyword_delimiter
+            vs_codes = taxonomy.get('vs', [])
+            ic_codes = taxonomy.get('ic', [])
+            ce_codes = taxonomy.get('ce', [])
 
-            # Film format
-            if 'film_format' in categories and categories['film_format']:
-                film_format = categories['film_format'][0]
-                if film_format:
-                    all_keywords.append(f"Film{delimiter}Format{delimiter}{film_format}")
+            # Visual Subject hierarchy
+            for code in vs_codes:
+                if code.startswith("VS1"):  # People
+                    all_keywords.append("People")
+                    if code.startswith("VS1.1"):  # Individual Portrait
+                        all_keywords.append(f"People{delimiter}Portrait")
+                        if code == "VS1.1.1":
+                            all_keywords.append(f"People{delimiter}Portrait{delimiter}Close-up")
+                        elif code == "VS1.1.2":
+                            all_keywords.append(f"People{delimiter}Portrait{delimiter}Half-body")
+                        elif code == "VS1.1.3":
+                            all_keywords.append(f"People{delimiter}Portrait{delimiter}Full-body")
+                    elif code.startswith("VS1.2"):  # Group
+                        all_keywords.append(f"People{delimiter}Group")
+                    elif code.startswith("VS1.3"):  # Human Activity
+                        all_keywords.append(f"People{delimiter}Activity")
+                
+                elif code.startswith("VS2"):  # Place
+                    all_keywords.append("Place")
+                    if code.startswith("VS2.1"):  # Natural Environment
+                        all_keywords.append(f"Place{delimiter}Natural")
+                    elif code.startswith("VS2.2"):  # Built Environment
+                        all_keywords.append(f"Place{delimiter}Built")
+                
+                elif code.startswith("VS3"):  # Objects
+                    all_keywords.append("Objects")
+                    if code.startswith("VS3.1"):  # Natural Objects
+                        all_keywords.append(f"Objects{delimiter}Natural")
+                    elif code.startswith("VS3.2"):  # Manufactured Objects
+                        all_keywords.append(f"Objects{delimiter}Manufactured")
 
-            # Film characteristics
-            if 'film_characteristics' in categories and categories['film_characteristics']:
-                for value in categories['film_characteristics']:
-                    all_keywords.append(f"Film{delimiter}Characteristics{delimiter}{value}")
+            # Image Characteristics hierarchy
+            for code in ic_codes:
+                if code.startswith("IC2.1"):  # Tonality
+                    if code == "IC2.1.1":  # Black & White
+                        all_keywords.append(f"Style{delimiter}Black & White")
+                    elif code == "IC2.1.2":  # Monochrome
+                        all_keywords.append(f"Style{delimiter}Monochrome")
+                
+                elif code.startswith("IC3.1"):  # Color Temperature
+                    all_keywords.append("Color")
+                    if code == "IC3.1.1":  # Warm Tones
+                        all_keywords.append(f"Color{delimiter}Warm")
+                    elif code == "IC3.1.2":  # Cool Tones
+                        all_keywords.append(f"Color{delimiter}Cool")
 
-            # Lens
-            if 'lens_characteristics' in categories and categories['lens_characteristics']:
-                all_keywords.append("Lens")
-                for value in categories['lens_characteristics']:
-                    all_keywords.append(f"Lens{delimiter}{value}")
-            
-            # Focal length
-            if 'focal_length_estimate' in categories and categories['focal_length_estimate']:
-                for value in categories['focal_length_estimate']:
-                    all_keywords.append(f"Lens{delimiter}FocalLength{delimiter}{value}")
-
-            # Aperture
-            if 'aperture_evidence' in categories and categories['aperture_evidence']:
-                for value in categories['aperture_evidence']:
-                    all_keywords.append(f"Lens{delimiter}Aperture{delimiter}{value}")
-
-            # Standard categories: content_type, main_subject, lighting, etc.
-            for cat_type in ['content_type','main_subject','lighting','color','mood','style']:
-                if cat_type in categories and categories[cat_type]:
-                    cat_display = cat_type.replace('_',' ').title()
-                    all_keywords.append(cat_display)
-                    for val in categories[cat_type]:
-                        all_keywords.append(f"{cat_display}{delimiter}{val}")
+            # Contextual Elements hierarchy
+            for code in ce_codes:
+                if code.startswith("CE1.2"):  # Time of Day
+                    all_keywords.append("Time")
+                    if code == "CE1.2.3":  # Golden Hour
+                        all_keywords.append(f"Time{delimiter}Golden Hour")
+                    elif code == "CE1.2.4":  # Blue Hour
+                        all_keywords.append(f"Time{delimiter}Blue Hour")
+                    elif code == "CE1.2.5":  # Night
+                        all_keywords.append(f"Time{delimiter}Night")
+                
+                elif code.startswith("CE3.3"):  # Photographic Genre
+                    all_keywords.append("Genre")
+                    if code == "CE3.3.1":  # Documentary
+                        all_keywords.append(f"Genre{delimiter}Documentary")
+                    elif code == "CE3.3.2":  # Street Photography
+                        all_keywords.append(f"Genre{delimiter}Street")
+                    elif code == "CE3.3.3":  # Fine Art
+                        all_keywords.append(f"Genre{delimiter}Fine Art")
 
         # Now insert or link keywords
         for kw in all_keywords:
@@ -323,13 +357,10 @@ class CatalogDatabase:
         else:
             logger.debug(f"Skipping rating update; user rating is {current_rating}")
 
-    def _update_caption_for_film_analysis(self, cursor, image_id: int, categories: Dict[str, Any], aesthetic_score: float):
+    def _update_caption_for_film_analysis(self, cursor, image_id: int, ai_metadata: Dict[str, Any]):
         """
-        Insert or update the caption field with film analysis details, standard categories, etc.
+        Insert or update the caption field with film analysis details, taxonomy, etc.
         """
-        if not categories:
-            return
-
         # Check for 'caption' column
         cursor.execute("PRAGMA table_info(Adobe_images)")
         adobe_images_columns = [row[1] for row in cursor.fetchall()]
@@ -337,38 +368,70 @@ class CatalogDatabase:
             return
 
         # Build text sections
+        aesthetic_score = ai_metadata.get('aesthetic_score', 0)
         score_text = f"AI Aesthetic Score: {aesthetic_score:.1f}/10"
 
+        # Extract taxonomy information
+        taxonomy = ai_metadata.get('taxonomy', {})
+        vs_codes = taxonomy.get('vs', [])
+        ic_codes = taxonomy.get('ic', [])
+        ce_codes = taxonomy.get('ce', [])
+
+        # Build film analysis text
         film_analysis_text = ""
-        film_categories = ['film_format','film_characteristics','lens_characteristics','focal_length_estimate','aperture_evidence']
-        film_details = {}
-        for cat in film_categories:
-            if cat in categories and categories[cat]:
-                film_details[cat] = categories[cat]
-
-        if film_details:
+        if taxonomy:
             film_analysis_text = "\n\nFILM ANALYSIS:\n"
-            if 'film_format' in film_details:
-                film_analysis_text += f"Film Format: {', '.join(film_details['film_format'])}\n"
-            if 'film_characteristics' in film_details:
-                film_analysis_text += f"Film Characteristics: {', '.join(film_details['film_characteristics'])}\n"
-            if 'lens_characteristics' in film_details:
-                film_analysis_text += f"Lens Characteristics: {', '.join(film_details['lens_characteristics'])}\n"
-            if 'focal_length_estimate' in film_details:
-                film_analysis_text += f"Focal Length: {', '.join(film_details['focal_length_estimate'])}\n"
-            if 'aperture_evidence' in film_details:
-                film_analysis_text += f"Aperture/DOF: {', '.join(film_details['aperture_evidence'])}\n"
+            
+            # Film format
+            film_format = []
+            if "CE3.2.1" in ce_codes:  # Square Format
+                film_format.append("120-6x6")
+            elif "CE3.2.2" in ce_codes:  # Rectangular (3:2)
+                film_format.append("35mm")
+            elif "CE3.2.4" in ce_codes:  # Panoramic
+                film_format.append("120-6x9")
+            
+            if film_format:
+                film_analysis_text += f"Film Format: {', '.join(film_format)}\n"
+            
+            # Film characteristics
+            film_chars = []
+            if "IC2.1.1" in ic_codes:  # Black & White
+                film_chars.append("black & white")
+            elif "IC2.1.3" in ic_codes:  # Color Image
+                film_chars.append("color")
+            
+            if "IC2.2.1" in ic_codes:  # High Contrast
+                film_chars.append("high contrast")
+            elif "IC2.2.3" in ic_codes:  # Low/Soft Contrast
+                film_chars.append("low contrast")
+            
+            if film_chars:
+                film_analysis_text += f"Film Characteristics: {', '.join(film_chars)}\n"
+            
+            # Lens characteristics
+            lens_chars = []
+            if "IC2.3.1" in ic_codes:  # All-in-focus/Deep Depth
+                lens_chars.append("deep depth of field")
+            elif "IC2.3.2" in ic_codes:  # Selective Focus/Shallow Depth
+                lens_chars.append("shallow depth of field")
+            
+            if lens_chars:
+                film_analysis_text += f"Lens Characteristics: {', '.join(lens_chars)}\n"
 
-        # Standard categories
-        standard_categories = ['content_type','main_subject','lighting','color','mood','style']
-        cat_entries = []
-        for cat_type in standard_categories:
-            if cat_type in categories and categories[cat_type]:
-                cat_name = cat_type.replace('_',' ').title()
-                cat_entries.append(f"{cat_name}: {', '.join(categories[cat_type])}")
-        categories_text = ""
-        if cat_entries:
-            categories_text = "\n\nCategories:\n" + "\n".join(cat_entries)
+        # Extract detailed evaluation if available
+        detailed_eval_text = ""
+        if "detailed_evaluation" in ai_metadata and "overall_rating" in ai_metadata["detailed_evaluation"]:
+            overall = ai_metadata["detailed_evaluation"]["overall_rating"]
+            strengths = overall.get("main_strengths", "")
+            weaknesses = overall.get("main_weaknesses", "")
+            
+            if strengths or weaknesses:
+                detailed_eval_text = "\n\nDETAILED EVALUATION:\n"
+                if strengths:
+                    detailed_eval_text += f"Strengths: {strengths}\n"
+                if weaknesses:
+                    detailed_eval_text += f"Weaknesses: {weaknesses}\n"
 
         # Fetch existing caption
         cursor.execute("SELECT caption FROM Adobe_images WHERE id_local = ?", (image_id,))
@@ -399,31 +462,31 @@ class CatalogDatabase:
             elif film_analysis_text:
                 new_caption += film_analysis_text
 
-            # Update or add categories
-            if 'Categories:' in new_caption:
-                if categories_text:
+            # Update or add detailed evaluation
+            if 'DETAILED EVALUATION:' in new_caption:
+                if detailed_eval_text:
                     new_caption = re.sub(
-                        r'Categories:.*?(?=\n\n|$)',
-                        categories_text.replace("\n\nCategories:", "Categories:"),
+                        r'DETAILED EVALUATION:.*?(?=\n\n|$)',
+                        detailed_eval_text.replace("\n\nDETAILED EVALUATION:", "DETAILED EVALUATION:"),
                         new_caption,
                         flags=re.DOTALL
                     )
                 else:
-                    new_caption = re.sub(r'\n\nCategories:.*?(?=\n\n|$)', '', new_caption, flags=re.DOTALL)
-            elif categories_text:
-                new_caption += categories_text
+                    new_caption = re.sub(r'\n\nDETAILED EVALUATION:.*?(?=\n\n|$)', '', new_caption, flags=re.DOTALL)
+            elif detailed_eval_text:
+                new_caption += detailed_eval_text
 
         else:
             # No existing caption -> create from scratch
-            new_caption = f"{score_text}{film_analysis_text}{categories_text}"
+            new_caption = f"{score_text}{film_analysis_text}{detailed_eval_text}"
 
         cursor.execute("UPDATE Adobe_images SET caption = ? WHERE id_local = ?", (new_caption, image_id))
 
-    def _store_structured_metadata(self, cursor, image_id: int, categories: Dict[str, Any]):
+    def _store_structured_metadata(self, cursor, image_id: int, ai_metadata: Dict[str, Any]):
         """
-        Store the entire categories dict in Adobe_additionalMetadata.externalEditingData as JSON (if possible).
+        Store the entire AI metadata in Adobe_additionalMetadata.externalEditingData as JSON.
         """
-        if not categories:
+        if not ai_metadata:
             return
 
         try:
@@ -434,7 +497,24 @@ class CatalogDatabase:
 
             cursor.execute("SELECT id_local FROM Adobe_additionalMetadata WHERE image = ?", (image_id,))
             row = cursor.fetchone()
-            metadata_json = json.dumps(categories)
+            
+            # Store the complete AI metadata including taxonomy and evaluations
+            metadata_to_store = {
+                "taxonomy": ai_metadata.get("taxonomy", {}),
+                "aesthetic_score": ai_metadata.get("aesthetic_score", 0),
+                "keywords": ai_metadata.get("keywords", []),
+                "tags": ai_metadata.get("tags", [])
+            }
+            
+            # Include detailed evaluation if available
+            if "detailed_evaluation" in ai_metadata:
+                metadata_to_store["detailed_evaluation"] = ai_metadata["detailed_evaluation"]
+            
+            # Include aesthetic evaluation if available
+            if "aesthetic_evaluation" in ai_metadata:
+                metadata_to_store["aesthetic_evaluation"] = ai_metadata["aesthetic_evaluation"]
+            
+            metadata_json = json.dumps(metadata_to_store)
 
             if row:
                 cursor.execute(
@@ -451,18 +531,11 @@ class CatalogDatabase:
 
     def update_image_metadata(self, image_id: int, ai_metadata: Dict[str, Any]) -> bool:
         """
-        Update Lightroom catalog with AI-generated metadata (keywords, tags, film analysis).
-        
-        Splits the logic into sub-methods:
-            _apply_keywords(...)
-            _apply_aesthetic_score(...)
-            _update_caption_for_film_analysis(...)
-            _store_structured_metadata(...)
+        Update Lightroom catalog with AI-generated metadata (keywords, tags, taxonomy, evaluations).
         """
         if not ai_metadata:
             return False
 
-        categories = ai_metadata.get('categories', {})
         aesthetic_score = ai_metadata.get('aesthetic_score', 0)
 
         try:
@@ -473,11 +546,11 @@ class CatalogDatabase:
                 # 2) Aesthetic score
                 self._apply_aesthetic_score(cursor, image_id, aesthetic_score)
 
-                # 3) Caption (film analysis, categories, etc.)
-                self._update_caption_for_film_analysis(cursor, image_id, categories, aesthetic_score)
+                # 3) Caption (film analysis, taxonomy, etc.)
+                self._update_caption_for_film_analysis(cursor, image_id, ai_metadata)
 
                 # 4) JSON metadata in Adobe_additionalMetadata
-                self._store_structured_metadata(cursor, image_id, categories)
+                self._store_structured_metadata(cursor, image_id, ai_metadata)
 
             return True
 
