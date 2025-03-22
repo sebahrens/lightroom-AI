@@ -217,6 +217,7 @@ class CatalogDatabase:
     def _apply_keywords(self, cursor, image_id: int, ai_metadata: Dict[str, Any]):
         """
         Insert or link the 'AI_Processed' keyword, plus other keywords, tags, film format, etc.
+        Only apply L2 or L3 keywords, not L1 (top-level) keywords.
         """
         keywords = ai_metadata.get('keywords', [])
         tags = ai_metadata.get('tags', [])
@@ -246,74 +247,398 @@ class CatalogDatabase:
                 elif key.upper() == "CE":
                     ce_codes = value
 
-            # Visual Subject hierarchy
+            # Track which L2 categories have L3 subcategories
+            vs_l2_with_l3 = set()
+            ic_l2_with_l3 = set()
+            ce_l2_with_l3 = set()
+
+            # First pass to identify L3 codes
             for code in vs_codes:
                 code_upper = code.upper()
+                parts = code_upper.split('.')
+                if len(parts) == 3:  # L3 code
+                    l2_prefix = '.'.join(parts[:2])
+                    vs_l2_with_l3.add(l2_prefix)
+            
+            for code in ic_codes:
+                code_upper = code.upper()
+                parts = code_upper.split('.')
+                if len(parts) == 3:  # L3 code
+                    l2_prefix = '.'.join(parts[:2])
+                    ic_l2_with_l3.add(l2_prefix)
+            
+            for code in ce_codes:
+                code_upper = code.upper()
+                parts = code_upper.split('.')
+                if len(parts) == 3:  # L3 code
+                    l2_prefix = '.'.join(parts[:2])
+                    ce_l2_with_l3.add(l2_prefix)
+
+            # Visual Subject hierarchy - second pass to add keywords
+            for code in vs_codes:
+                code_upper = code.upper()
+                parts = code_upper.split('.')
+                
+                # Skip L1 codes (e.g., VS1)
+                if len(parts) == 1:
+                    continue
+                    
                 if code_upper.startswith("VS1"):  # People
-                    all_keywords.append("People")
+                    # Don't add the top-level "People" keyword
                     if code_upper.startswith("VS1.1"):  # Individual Portrait
-                        all_keywords.append(f"People{delimiter}Portrait")
-                        if code_upper == "VS1.1.1":
+                        # Only add L2 if no L3 is present
+                        if code_upper == "VS1.1" and "VS1.1" not in vs_l2_with_l3:
+                            all_keywords.append(f"People{delimiter}Portrait")
+                        # Add L3 keywords
+                        elif code_upper == "VS1.1.1":
                             all_keywords.append(f"People{delimiter}Portrait{delimiter}Close-up")
                         elif code_upper == "VS1.1.2":
                             all_keywords.append(f"People{delimiter}Portrait{delimiter}Half-body")
                         elif code_upper == "VS1.1.3":
                             all_keywords.append(f"People{delimiter}Portrait{delimiter}Full-body")
                     elif code_upper.startswith("VS1.2"):  # Group
-                        all_keywords.append(f"People{delimiter}Group")
+                        # Only add L2 if no L3 is present
+                        if code_upper == "VS1.2" and "VS1.2" not in vs_l2_with_l3:
+                            all_keywords.append(f"People{delimiter}Group")
+                        # Add L3 keywords for Group
+                        elif code_upper == "VS1.2.1":
+                            all_keywords.append(f"People{delimiter}Group{delimiter}Small")
+                        elif code_upper == "VS1.2.2":
+                            all_keywords.append(f"People{delimiter}Group{delimiter}Medium")
+                        elif code_upper == "VS1.2.3":
+                            all_keywords.append(f"People{delimiter}Group{delimiter}Large")
                     elif code_upper.startswith("VS1.3"):  # Human Activity
-                        all_keywords.append(f"People{delimiter}Activity")
+                        # Only add L2 if no L3 is present
+                        if code_upper == "VS1.3" and "VS1.3" not in vs_l2_with_l3:
+                            all_keywords.append(f"People{delimiter}Activity")
+                        # Add L3 keywords for Activity
+                        elif code_upper == "VS1.3.1":
+                            all_keywords.append(f"People{delimiter}Activity{delimiter}Work")
+                        elif code_upper == "VS1.3.2":
+                            all_keywords.append(f"People{delimiter}Activity{delimiter}Leisure")
+                        elif code_upper == "VS1.3.3":
+                            all_keywords.append(f"People{delimiter}Activity{delimiter}Ceremony")
+                        elif code_upper == "VS1.3.4":
+                            all_keywords.append(f"People{delimiter}Activity{delimiter}Daily Life")
                 
                 elif code_upper.startswith("VS2"):  # Place
-                    all_keywords.append("Place")
+                    # Don't add the top-level "Place" keyword
                     if code_upper.startswith("VS2.1"):  # Natural Environment
-                        all_keywords.append(f"Place{delimiter}Natural")
+                        # Only add L2 if no L3 is present
+                        if code_upper == "VS2.1" and "VS2.1" not in vs_l2_with_l3:
+                            all_keywords.append(f"Place{delimiter}Natural")
+                        # Add L3 keywords for Natural Environment
+                        elif code_upper == "VS2.1.1":
+                            all_keywords.append(f"Place{delimiter}Natural{delimiter}Mountain")
+                        elif code_upper == "VS2.1.2":
+                            all_keywords.append(f"Place{delimiter}Natural{delimiter}Water")
+                        elif code_upper == "VS2.1.3":
+                            all_keywords.append(f"Place{delimiter}Natural{delimiter}Forest")
+                        elif code_upper == "VS2.1.4":
+                            all_keywords.append(f"Place{delimiter}Natural{delimiter}Desert")
+                        elif code_upper == "VS2.1.5":
+                            all_keywords.append(f"Place{delimiter}Natural{delimiter}Sky")
                     elif code_upper.startswith("VS2.2"):  # Built Environment
-                        all_keywords.append(f"Place{delimiter}Built")
+                        # Only add L2 if no L3 is present
+                        if code_upper == "VS2.2" and "VS2.2" not in vs_l2_with_l3:
+                            all_keywords.append(f"Place{delimiter}Built")
+                        # Add L3 keywords for Built Environment
+                        elif code_upper == "VS2.2.1":
+                            all_keywords.append(f"Place{delimiter}Built{delimiter}Architecture")
+                        elif code_upper == "VS2.2.2":
+                            all_keywords.append(f"Place{delimiter}Built{delimiter}Interior")
+                        elif code_upper == "VS2.2.3":
+                            all_keywords.append(f"Place{delimiter}Built{delimiter}Urban")
+                        elif code_upper == "VS2.2.4":
+                            all_keywords.append(f"Place{delimiter}Built{delimiter}Rural")
+                        elif code_upper == "VS2.2.5":
+                            all_keywords.append(f"Place{delimiter}Built{delimiter}Transportation")
                 
                 elif code_upper.startswith("VS3"):  # Objects
-                    all_keywords.append("Objects")
+                    # Don't add the top-level "Objects" keyword
                     if code_upper.startswith("VS3.1"):  # Natural Objects
-                        all_keywords.append(f"Objects{delimiter}Natural")
+                        # Only add L2 if no L3 is present
+                        if code_upper == "VS3.1" and "VS3.1" not in vs_l2_with_l3:
+                            all_keywords.append(f"Objects{delimiter}Natural")
+                        # Add L3 keywords for Natural Objects
+                        elif code_upper == "VS3.1.1":
+                            all_keywords.append(f"Objects{delimiter}Natural{delimiter}Flora")
+                        elif code_upper == "VS3.1.2":
+                            all_keywords.append(f"Objects{delimiter}Natural{delimiter}Fauna")
+                        elif code_upper == "VS3.1.3":
+                            all_keywords.append(f"Objects{delimiter}Natural{delimiter}Rocks")
                     elif code_upper.startswith("VS3.2"):  # Manufactured Objects
-                        all_keywords.append(f"Objects{delimiter}Manufactured")
+                        # Only add L2 if no L3 is present
+                        if code_upper == "VS3.2" and "VS3.2" not in vs_l2_with_l3:
+                            all_keywords.append(f"Objects{delimiter}Manufactured")
+                        # Add L3 keywords for Manufactured Objects
+                        elif code_upper == "VS3.2.1":
+                            all_keywords.append(f"Objects{delimiter}Manufactured{delimiter}Vehicles")
+                        elif code_upper == "VS3.2.2":
+                            all_keywords.append(f"Objects{delimiter}Manufactured{delimiter}Tools")
+                        elif code_upper == "VS3.2.3":
+                            all_keywords.append(f"Objects{delimiter}Manufactured{delimiter}Furnishings")
+                        elif code_upper == "VS3.2.4":
+                            all_keywords.append(f"Objects{delimiter}Manufactured{delimiter}Products")
+                        elif code_upper == "VS3.2.5":
+                            all_keywords.append(f"Objects{delimiter}Manufactured{delimiter}Art")
 
             # Image Characteristics hierarchy
             for code in ic_codes:
                 code_upper = code.upper()
-                if code_upper.startswith("IC2.1"):  # Tonality
-                    if code_upper == "IC2.1.1":  # Black & White
-                        all_keywords.append(f"Style{delimiter}Black & White")
-                    elif code_upper == "IC2.1.2":  # Monochrome
-                        all_keywords.append(f"Style{delimiter}Monochrome")
+                parts = code_upper.split('.')
                 
-                elif code_upper.startswith("IC3.1"):  # Color Temperature
-                    all_keywords.append("Color")
-                    if code_upper == "IC3.1.1":  # Warm Tones
-                        all_keywords.append(f"Color{delimiter}Warm")
-                    elif code_upper == "IC3.1.2":  # Cool Tones
-                        all_keywords.append(f"Color{delimiter}Cool")
+                # Skip L1 codes
+                if len(parts) == 1:
+                    continue
+                    
+                if code_upper.startswith("IC1"):  # Composition
+                    # Don't add top-level "Composition" keyword
+                    if code_upper.startswith("IC1.1"):  # Frame Arrangement
+                        # Only add L2 if no L3 is present
+                        if code_upper == "IC1.1" and "IC1.1" not in ic_l2_with_l3:
+                            all_keywords.append(f"Composition{delimiter}Frame")
+                        # Add L3 keywords
+                        elif code_upper == "IC1.1.1":
+                            all_keywords.append(f"Composition{delimiter}Frame{delimiter}Symmetrical")
+                        elif code_upper == "IC1.1.2":
+                            all_keywords.append(f"Composition{delimiter}Frame{delimiter}Rule of Thirds")
+                        elif code_upper == "IC1.1.3":
+                            all_keywords.append(f"Composition{delimiter}Frame{delimiter}Centered")
+                        elif code_upper == "IC1.1.4":
+                            all_keywords.append(f"Composition{delimiter}Frame{delimiter}Dynamic")
+                    elif code_upper.startswith("IC1.2"):  # Perspective
+                        # Only add L2 if no L3 is present
+                        if code_upper == "IC1.2" and "IC1.2" not in ic_l2_with_l3:
+                            all_keywords.append(f"Composition{delimiter}Perspective")
+                        # Add L3 keywords
+                        elif code_upper == "IC1.2.1":
+                            all_keywords.append(f"Composition{delimiter}Perspective{delimiter}Eye Level")
+                        elif code_upper == "IC1.2.2":
+                            all_keywords.append(f"Composition{delimiter}Perspective{delimiter}High Angle")
+                        elif code_upper == "IC1.2.3":
+                            all_keywords.append(f"Composition{delimiter}Perspective{delimiter}Low Angle")
+                        elif code_upper == "IC1.2.4":
+                            all_keywords.append(f"Composition{delimiter}Perspective{delimiter}Bird's Eye")
+                        elif code_upper == "IC1.2.5":
+                            all_keywords.append(f"Composition{delimiter}Perspective{delimiter}Worm's Eye")
+                    elif code_upper.startswith("IC1.3"):  # Distance/Scale
+                        # Only add L2 if no L3 is present
+                        if code_upper == "IC1.3" and "IC1.3" not in ic_l2_with_l3:
+                            all_keywords.append(f"Composition{delimiter}Distance")
+                        # Add L3 keywords
+                        elif code_upper == "IC1.3.1":
+                            all_keywords.append(f"Composition{delimiter}Distance{delimiter}Macro")
+                        elif code_upper == "IC1.3.2":
+                            all_keywords.append(f"Composition{delimiter}Distance{delimiter}Mid-range")
+                        elif code_upper == "IC1.3.3":
+                            all_keywords.append(f"Composition{delimiter}Distance{delimiter}Wide")
+                        elif code_upper == "IC1.3.4":
+                            all_keywords.append(f"Composition{delimiter}Distance{delimiter}Panoramic")
+                
+                elif code_upper.startswith("IC2"):  # Visual Style
+                    # Don't add top-level "Style" keyword
+                    if code_upper.startswith("IC2.1"):  # Tonality
+                        # Only add L2 if no L3 is present
+                        if code_upper == "IC2.1" and "IC2.1" not in ic_l2_with_l3:
+                            all_keywords.append(f"Style{delimiter}Tonality")
+                        # Add L3 keywords
+                        elif code_upper == "IC2.1.1":
+                            all_keywords.append(f"Style{delimiter}Black & White")
+                        elif code_upper == "IC2.1.2":
+                            all_keywords.append(f"Style{delimiter}Monochrome")
+                        elif code_upper == "IC2.1.3":
+                            all_keywords.append(f"Style{delimiter}Color")
+                    elif code_upper.startswith("IC2.2"):  # Contrast
+                        # Only add L2 if no L3 is present
+                        if code_upper == "IC2.2" and "IC2.2" not in ic_l2_with_l3:
+                            all_keywords.append(f"Style{delimiter}Contrast")
+                        # Add L3 keywords
+                        elif code_upper == "IC2.2.1":
+                            all_keywords.append(f"Style{delimiter}Contrast{delimiter}High")
+                        elif code_upper == "IC2.2.2":
+                            all_keywords.append(f"Style{delimiter}Contrast{delimiter}Medium")
+                        elif code_upper == "IC2.2.3":
+                            all_keywords.append(f"Style{delimiter}Contrast{delimiter}Low")
+                    elif code_upper.startswith("IC2.3"):  # Focus
+                        # Only add L2 if no L3 is present
+                        if code_upper == "IC2.3" and "IC2.3" not in ic_l2_with_l3:
+                            all_keywords.append(f"Style{delimiter}Focus")
+                        # Add L3 keywords
+                        elif code_upper == "IC2.3.1":
+                            all_keywords.append(f"Style{delimiter}Focus{delimiter}Deep Depth")
+                        elif code_upper == "IC2.3.2":
+                            all_keywords.append(f"Style{delimiter}Focus{delimiter}Shallow Depth")
+                        elif code_upper == "IC2.3.3":
+                            all_keywords.append(f"Style{delimiter}Focus{delimiter}Soft")
+                        elif code_upper == "IC2.3.4":
+                            all_keywords.append(f"Style{delimiter}Focus{delimiter}Motion Blur")
+                
+                elif code_upper.startswith("IC3"):  # Color Characteristics
+                    # Don't add top-level "Color" keyword
+                    if code_upper.startswith("IC3.1"):  # Color Temperature
+                        # Only add L2 if no L3 is present
+                        if code_upper == "IC3.1" and "IC3.1" not in ic_l2_with_l3:
+                            all_keywords.append(f"Color{delimiter}Temperature")
+                        # Add L3 keywords
+                        elif code_upper == "IC3.1.1":
+                            all_keywords.append(f"Color{delimiter}Warm")
+                        elif code_upper == "IC3.1.2":
+                            all_keywords.append(f"Color{delimiter}Cool")
+                        elif code_upper == "IC3.1.3":
+                            all_keywords.append(f"Color{delimiter}Neutral")
+                        elif code_upper == "IC3.1.4":
+                            all_keywords.append(f"Color{delimiter}Mixed")
+                    elif code_upper.startswith("IC3.2"):  # Color Saturation
+                        # Only add L2 if no L3 is present
+                        if code_upper == "IC3.2" and "IC3.2" not in ic_l2_with_l3:
+                            all_keywords.append(f"Color{delimiter}Saturation")
+                        # Add L3 keywords
+                        elif code_upper == "IC3.2.1":
+                            all_keywords.append(f"Color{delimiter}Saturation{delimiter}High")
+                        elif code_upper == "IC3.2.2":
+                            all_keywords.append(f"Color{delimiter}Saturation{delimiter}Moderate")
+                        elif code_upper == "IC3.2.3":
+                            all_keywords.append(f"Color{delimiter}Saturation{delimiter}Muted")
+                    elif code_upper.startswith("IC3.3"):  # Color Palette
+                        # Only add L2 if no L3 is present
+                        if code_upper == "IC3.3" and "IC3.3" not in ic_l2_with_l3:
+                            all_keywords.append(f"Color{delimiter}Palette")
+                        # Add L3 keywords
+                        elif code_upper == "IC3.3.1":
+                            all_keywords.append(f"Color{delimiter}Palette{delimiter}Monochromatic")
+                        elif code_upper == "IC3.3.2":
+                            all_keywords.append(f"Color{delimiter}Palette{delimiter}Complementary")
+                        elif code_upper == "IC3.3.3":
+                            all_keywords.append(f"Color{delimiter}Palette{delimiter}Analogous")
+                        elif code_upper == "IC3.3.4":
+                            all_keywords.append(f"Color{delimiter}Palette{delimiter}Variety")
 
             # Contextual Elements hierarchy
             for code in ce_codes:
                 code_upper = code.upper()
-                if code_upper.startswith("CE1.2"):  # Time of Day
-                    all_keywords.append("Time")
-                    if code_upper == "CE1.2.3":  # Golden Hour
-                        all_keywords.append(f"Time{delimiter}Golden Hour")
-                    elif code_upper == "CE1.2.4":  # Blue Hour
-                        all_keywords.append(f"Time{delimiter}Blue Hour")
-                    elif code_upper == "CE1.2.5":  # Night
-                        all_keywords.append(f"Time{delimiter}Night")
+                parts = code_upper.split('.')
                 
-                elif code_upper.startswith("CE3.3"):  # Photographic Genre
-                    all_keywords.append("Genre")
-                    if code_upper == "CE3.3.1":  # Documentary
-                        all_keywords.append(f"Genre{delimiter}Documentary")
-                    elif code_upper == "CE3.3.2":  # Street Photography
-                        all_keywords.append(f"Genre{delimiter}Street")
-                    elif code_upper == "CE3.3.3":  # Fine Art
-                        all_keywords.append(f"Genre{delimiter}Fine Art")
+                # Skip L1 codes
+                if len(parts) == 1:
+                    continue
+                    
+                if code_upper.startswith("CE1"):  # Temporal Indicators
+                    # Don't add top-level "Time" keyword
+                    if code_upper.startswith("CE1.1"):  # Era Identifiers
+                        # Only add L2 if no L3 is present
+                        if code_upper == "CE1.1" and "CE1.1" not in ce_l2_with_l3:
+                            all_keywords.append(f"Time{delimiter}Era")
+                        # Add L3 keywords
+                        elif code_upper == "CE1.1.1":
+                            all_keywords.append(f"Time{delimiter}Era{delimiter}1970s")
+                        elif code_upper == "CE1.1.2":
+                            all_keywords.append(f"Time{delimiter}Era{delimiter}1980s")
+                        elif code_upper == "CE1.1.3":
+                            all_keywords.append(f"Time{delimiter}Era{delimiter}1990s")
+                        elif code_upper == "CE1.1.4":
+                            all_keywords.append(f"Time{delimiter}Era{delimiter}2000s")
+                        elif code_upper == "CE1.1.5":
+                            all_keywords.append(f"Time{delimiter}Era{delimiter}2010-Present")
+                    elif code_upper.startswith("CE1.2"):  # Time of Day
+                        # Only add L2 if no L3 is present
+                        if code_upper == "CE1.2" and "CE1.2" not in ce_l2_with_l3:
+                            all_keywords.append(f"Time{delimiter}Day")
+                        # Add L3 keywords
+                        elif code_upper == "CE1.2.1":
+                            all_keywords.append(f"Time{delimiter}Day{delimiter}Dawn")
+                        elif code_upper == "CE1.2.2":
+                            all_keywords.append(f"Time{delimiter}Day{delimiter}Daytime")
+                        elif code_upper == "CE1.2.3":
+                            all_keywords.append(f"Time{delimiter}Golden Hour")
+                        elif code_upper == "CE1.2.4":
+                            all_keywords.append(f"Time{delimiter}Blue Hour")
+                        elif code_upper == "CE1.2.5":
+                            all_keywords.append(f"Time{delimiter}Night")
+                    elif code_upper.startswith("CE1.3"):  # Seasonal Indicators
+                        # Only add L2 if no L3 is present
+                        if code_upper == "CE1.3" and "CE1.3" not in ce_l2_with_l3:
+                            all_keywords.append(f"Time{delimiter}Season")
+                        # Add L3 keywords
+                        elif code_upper == "CE1.3.1":
+                            all_keywords.append(f"Time{delimiter}Season{delimiter}Spring")
+                        elif code_upper == "CE1.3.2":
+                            all_keywords.append(f"Time{delimiter}Season{delimiter}Summer")
+                        elif code_upper == "CE1.3.3":
+                            all_keywords.append(f"Time{delimiter}Season{delimiter}Autumn")
+                        elif code_upper == "CE1.3.4":
+                            all_keywords.append(f"Time{delimiter}Season{delimiter}Winter")
+                
+                elif code_upper.startswith("CE2"):  # Cultural Context
+                    # Don't add top-level "Culture" keyword
+                    if code_upper.startswith("CE2.1"):  # Geographic Indicators
+                        # Only add L2 if no L3 is present
+                        if code_upper == "CE2.1" and "CE2.1" not in ce_l2_with_l3:
+                            all_keywords.append(f"Culture{delimiter}Geographic")
+                        # Add L3 keywords
+                        elif code_upper == "CE2.1.1":
+                            all_keywords.append(f"Culture{delimiter}Geographic{delimiter}Landmark")
+                        elif code_upper == "CE2.1.2":
+                            all_keywords.append(f"Culture{delimiter}Geographic{delimiter}Architecture")
+                        elif code_upper == "CE2.1.3":
+                            all_keywords.append(f"Culture{delimiter}Geographic{delimiter}Biome")
+                        elif code_upper == "CE2.1.4":
+                            all_keywords.append(f"Culture{delimiter}Geographic{delimiter}Cultural")
+                    elif code_upper.startswith("CE2.2"):  # Social Context
+                        # Only add L2 if no L3 is present
+                        if code_upper == "CE2.2" and "CE2.2" not in ce_l2_with_l3:
+                            all_keywords.append(f"Culture{delimiter}Social")
+                        # Add L3 keywords
+                        elif code_upper == "CE2.2.1":
+                            all_keywords.append(f"Culture{delimiter}Social{delimiter}Personal")
+                        elif code_upper == "CE2.2.2":
+                            all_keywords.append(f"Culture{delimiter}Social{delimiter}Public")
+                        elif code_upper == "CE2.2.3":
+                            all_keywords.append(f"Culture{delimiter}Social{delimiter}Tradition")
+                        elif code_upper == "CE2.2.4":
+                            all_keywords.append(f"Culture{delimiter}Social{delimiter}Professional")
+                
+                elif code_upper.startswith("CE3"):  # Photographic Condition
+                    # Don't add top-level "Photo" keyword
+                    if code_upper.startswith("CE3.1"):  # Print Quality
+                        # Only add L2 if no L3 is present
+                        if code_upper == "CE3.1" and "CE3.1" not in ce_l2_with_l3:
+                            all_keywords.append(f"Photo{delimiter}Quality")
+                        # Add L3 keywords
+                        elif code_upper == "CE3.1.1":
+                            all_keywords.append(f"Photo{delimiter}Quality{delimiter}Well-Preserved")
+                        elif code_upper == "CE3.1.2":
+                            all_keywords.append(f"Photo{delimiter}Quality{delimiter}Moderate Aging")
+                        elif code_upper == "CE3.1.3":
+                            all_keywords.append(f"Photo{delimiter}Quality{delimiter}Significant Aging")
+                    elif code_upper.startswith("CE3.2"):  # Format Indicators
+                        # Only add L2 if no L3 is present
+                        if code_upper == "CE3.2" and "CE3.2" not in ce_l2_with_l3:
+                            all_keywords.append(f"Photo{delimiter}Format")
+                        # Add L3 keywords
+                        elif code_upper == "CE3.2.1":
+                            all_keywords.append(f"Photo{delimiter}Format{delimiter}Square")
+                        elif code_upper == "CE3.2.2":
+                            all_keywords.append(f"Photo{delimiter}Format{delimiter}3:2")
+                        elif code_upper == "CE3.2.3":
+                            all_keywords.append(f"Photo{delimiter}Format{delimiter}4:3")
+                        elif code_upper == "CE3.2.4":
+                            all_keywords.append(f"Photo{delimiter}Format{delimiter}Panoramic")
+                    elif code_upper.startswith("CE3.3"):  # Photographic Genre
+                        # Only add L2 if no L3 is present
+                        if code_upper == "CE3.3" and "CE3.3" not in ce_l2_with_l3:
+                            all_keywords.append(f"Genre")
+                        # Add L3 keywords
+                        elif code_upper == "CE3.3.1":
+                            all_keywords.append(f"Genre{delimiter}Documentary")
+                        elif code_upper == "CE3.3.2":
+                            all_keywords.append(f"Genre{delimiter}Street")
+                        elif code_upper == "CE3.3.3":
+                            all_keywords.append(f"Genre{delimiter}Fine Art")
+                        elif code_upper == "CE3.3.4":
+                            all_keywords.append(f"Genre{delimiter}Snapshot")
+                        elif code_upper == "CE3.3.5":
+                            all_keywords.append(f"Genre{delimiter}Experimental")
 
         # Now insert or link keywords
         for kw in all_keywords:
