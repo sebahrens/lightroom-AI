@@ -5,6 +5,7 @@ Database interaction with Lightroom catalog.
 import os
 import sqlite3
 import logging
+import time
 from typing import List, Tuple, Dict, Any, Optional, Set
 from contextlib import contextmanager
 import json
@@ -40,6 +41,10 @@ class CatalogDatabase:
         # Get hierarchical preferences if available
         self.use_hierarchical_keywords = getattr(config, 'use_hierarchical_keywords', False)
         self.keyword_delimiter = getattr(config, 'keyword_delimiter', ':')
+        
+        # Get database timeout from config, default to 30 seconds if not specified
+        self.db_busy_timeout = getattr(config, 'db_busy_timeout', 30000)
+        self.max_retries = getattr(config, 'max_retries', 3)
 
     def _connect(self):
         """
@@ -50,8 +55,8 @@ class CatalogDatabase:
             conn = sqlite3.connect(self.catalog_path, isolation_level=None)
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("PRAGMA synchronous=NORMAL")
-            # 30 second busy_timeout to reduce locking errors
-            conn.execute("PRAGMA busy_timeout=30000")
+            # Set busy_timeout to reduce locking errors
+            conn.execute(f"PRAGMA busy_timeout={self.db_busy_timeout}")
             return conn
         except sqlite3.Error as e:
             logger.error(f"Failed to connect to Lightroom catalog: {str(e)}")
@@ -72,23 +77,62 @@ class CatalogDatabase:
         pass
 
     @contextmanager
-    def cursor(self):
+    def cursor(self, retries=None):
         """
         Get a cursor as a context manager, ensuring proper cleanup.
         Each call opens a new connection; commits or rolls back, then closes.
+        
+        Args:
+            retries: Number of retries if database is locked (defaults to self.max_retries)
         """
-        conn = self._connect()
-        conn.execute("BEGIN DEFERRED")
-        cursor = conn.cursor()
-        try:
-            yield cursor
-            conn.commit()
-        except Exception as e:
-            conn.rollback()
-            raise e
-        finally:
-            cursor.close()
-            conn.close()
+        if retries is None:
+            retries = self.max_retries
+            
+        retry_count = 0
+        last_error = None
+        
+        while retry_count <= retries:
+            try:
+                conn = self._connect()
+                conn.execute("BEGIN DEFERRED")
+                cursor = conn.cursor()
+                try:
+                    yield cursor
+                    conn.commit()
+                    return  # Success, exit the retry loop
+                except sqlite3.OperationalError as e:
+                    if "database is locked" in str(e) and retry_count < retries:
+                        conn.rollback()
+                        last_error = e
+                        retry_count += 1
+                        wait_time = 0.5 * (2 ** retry_count)  # Exponential backoff
+                        logger.warning(f"Database locked, retrying in {wait_time:.2f}s (attempt {retry_count}/{retries})")
+                        time.sleep(wait_time)
+                    else:
+                        conn.rollback()
+                        raise
+                except Exception as e:
+                    conn.rollback()
+                    raise
+                finally:
+                    cursor.close()
+                    conn.close()
+            except sqlite3.OperationalError as e:
+                if "database is locked" in str(e) and retry_count < retries:
+                    last_error = e
+                    retry_count += 1
+                    wait_time = 0.5 * (2 ** retry_count)  # Exponential backoff
+                    logger.warning(f"Database locked during connection, retrying in {wait_time:.2f}s (attempt {retry_count}/{retries})")
+                    time.sleep(wait_time)
+                else:
+                    raise
+        
+        # If we get here, all retries failed
+        if last_error:
+            logger.error(f"All retries failed: {str(last_error)}")
+            raise last_error
+        else:
+            raise RuntimeError("Failed to connect to database after multiple retries")
 
     def commit(self):
         """Commit is handled within the cursor() context manager."""
@@ -893,7 +937,8 @@ class CatalogDatabase:
         aesthetic_score = ai_metadata.get('aesthetic_score', 0)
 
         try:
-            with self.cursor() as cursor:
+            # Use a higher retry count for metadata updates
+            with self.cursor(retries=5) as cursor:
                 # 1) Keywords
                 self._apply_keywords(cursor, image_id, ai_metadata)
 
