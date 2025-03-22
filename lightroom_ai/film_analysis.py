@@ -711,7 +711,19 @@ def validate_taxonomy_codes(analysis_result: Dict[str, Any]) -> Tuple[bool, Opti
         for code in codes:
             # Convert code to uppercase for case-insensitive comparison
             code_upper = code.upper()
+            
+            # Check if the code belongs to the correct category
             if code_upper not in valid_codes[category_upper]:
-                return False, f"Invalid taxonomy code: {code} in category {category}"
+                # Check if the code exists in any other category
+                found_in_category = None
+                for cat, cat_codes in valid_codes.items():
+                    if code_upper in cat_codes:
+                        found_in_category = cat
+                        break
+                
+                if found_in_category:
+                    return False, f"Invalid taxonomy code: {code} in category {category}. This code belongs to category {found_in_category}."
+                else:
+                    return False, f"Invalid taxonomy code: {code} in category {category}"
     
     return True, None

@@ -232,74 +232,87 @@ class CatalogDatabase:
         # If hierarchical keywords are enabled, add them from taxonomy
         if self.use_hierarchical_keywords and taxonomy:
             delimiter = self.keyword_delimiter
-            vs_codes = taxonomy.get('vs', [])
-            ic_codes = taxonomy.get('ic', [])
-            ce_codes = taxonomy.get('ce', [])
+            
+            # Case-insensitive access to taxonomy keys
+            vs_codes = []
+            ic_codes = []
+            ce_codes = []
+            
+            for key, value in taxonomy.items():
+                if key.upper() == "VS":
+                    vs_codes = value
+                elif key.upper() == "IC":
+                    ic_codes = value
+                elif key.upper() == "CE":
+                    ce_codes = value
 
             # Visual Subject hierarchy
             for code in vs_codes:
-                if code.startswith("VS1"):  # People
+                code_upper = code.upper()
+                if code_upper.startswith("VS1"):  # People
                     all_keywords.append("People")
-                    if code.startswith("VS1.1"):  # Individual Portrait
+                    if code_upper.startswith("VS1.1"):  # Individual Portrait
                         all_keywords.append(f"People{delimiter}Portrait")
-                        if code == "VS1.1.1":
+                        if code_upper == "VS1.1.1":
                             all_keywords.append(f"People{delimiter}Portrait{delimiter}Close-up")
-                        elif code == "VS1.1.2":
+                        elif code_upper == "VS1.1.2":
                             all_keywords.append(f"People{delimiter}Portrait{delimiter}Half-body")
-                        elif code == "VS1.1.3":
+                        elif code_upper == "VS1.1.3":
                             all_keywords.append(f"People{delimiter}Portrait{delimiter}Full-body")
-                    elif code.startswith("VS1.2"):  # Group
+                    elif code_upper.startswith("VS1.2"):  # Group
                         all_keywords.append(f"People{delimiter}Group")
-                    elif code.startswith("VS1.3"):  # Human Activity
+                    elif code_upper.startswith("VS1.3"):  # Human Activity
                         all_keywords.append(f"People{delimiter}Activity")
                 
-                elif code.startswith("VS2"):  # Place
+                elif code_upper.startswith("VS2"):  # Place
                     all_keywords.append("Place")
-                    if code.startswith("VS2.1"):  # Natural Environment
+                    if code_upper.startswith("VS2.1"):  # Natural Environment
                         all_keywords.append(f"Place{delimiter}Natural")
-                    elif code.startswith("VS2.2"):  # Built Environment
+                    elif code_upper.startswith("VS2.2"):  # Built Environment
                         all_keywords.append(f"Place{delimiter}Built")
                 
-                elif code.startswith("VS3"):  # Objects
+                elif code_upper.startswith("VS3"):  # Objects
                     all_keywords.append("Objects")
-                    if code.startswith("VS3.1"):  # Natural Objects
+                    if code_upper.startswith("VS3.1"):  # Natural Objects
                         all_keywords.append(f"Objects{delimiter}Natural")
-                    elif code.startswith("VS3.2"):  # Manufactured Objects
+                    elif code_upper.startswith("VS3.2"):  # Manufactured Objects
                         all_keywords.append(f"Objects{delimiter}Manufactured")
 
             # Image Characteristics hierarchy
             for code in ic_codes:
-                if code.startswith("IC2.1"):  # Tonality
-                    if code == "IC2.1.1":  # Black & White
+                code_upper = code.upper()
+                if code_upper.startswith("IC2.1"):  # Tonality
+                    if code_upper == "IC2.1.1":  # Black & White
                         all_keywords.append(f"Style{delimiter}Black & White")
-                    elif code == "IC2.1.2":  # Monochrome
+                    elif code_upper == "IC2.1.2":  # Monochrome
                         all_keywords.append(f"Style{delimiter}Monochrome")
                 
-                elif code.startswith("IC3.1"):  # Color Temperature
+                elif code_upper.startswith("IC3.1"):  # Color Temperature
                     all_keywords.append("Color")
-                    if code == "IC3.1.1":  # Warm Tones
+                    if code_upper == "IC3.1.1":  # Warm Tones
                         all_keywords.append(f"Color{delimiter}Warm")
-                    elif code == "IC3.1.2":  # Cool Tones
+                    elif code_upper == "IC3.1.2":  # Cool Tones
                         all_keywords.append(f"Color{delimiter}Cool")
 
             # Contextual Elements hierarchy
             for code in ce_codes:
-                if code.startswith("CE1.2"):  # Time of Day
+                code_upper = code.upper()
+                if code_upper.startswith("CE1.2"):  # Time of Day
                     all_keywords.append("Time")
-                    if code == "CE1.2.3":  # Golden Hour
+                    if code_upper == "CE1.2.3":  # Golden Hour
                         all_keywords.append(f"Time{delimiter}Golden Hour")
-                    elif code == "CE1.2.4":  # Blue Hour
+                    elif code_upper == "CE1.2.4":  # Blue Hour
                         all_keywords.append(f"Time{delimiter}Blue Hour")
-                    elif code == "CE1.2.5":  # Night
+                    elif code_upper == "CE1.2.5":  # Night
                         all_keywords.append(f"Time{delimiter}Night")
                 
-                elif code.startswith("CE3.3"):  # Photographic Genre
+                elif code_upper.startswith("CE3.3"):  # Photographic Genre
                     all_keywords.append("Genre")
-                    if code == "CE3.3.1":  # Documentary
+                    if code_upper == "CE3.3.1":  # Documentary
                         all_keywords.append(f"Genre{delimiter}Documentary")
-                    elif code == "CE3.3.2":  # Street Photography
+                    elif code_upper == "CE3.3.2":  # Street Photography
                         all_keywords.append(f"Genre{delimiter}Street")
-                    elif code == "CE3.3.3":  # Fine Art
+                    elif code_upper == "CE3.3.3":  # Fine Art
                         all_keywords.append(f"Genre{delimiter}Fine Art")
 
         # Now insert or link keywords
@@ -373,9 +386,19 @@ class CatalogDatabase:
 
         # Extract taxonomy information
         taxonomy = ai_metadata.get('taxonomy', {})
-        vs_codes = taxonomy.get('vs', [])
-        ic_codes = taxonomy.get('ic', [])
-        ce_codes = taxonomy.get('ce', [])
+        
+        # Case-insensitive access to taxonomy keys
+        vs_codes = []
+        ic_codes = []
+        ce_codes = []
+        
+        for key, value in taxonomy.items():
+            if key.upper() == "VS":
+                vs_codes = value
+            elif key.upper() == "IC":
+                ic_codes = value
+            elif key.upper() == "CE":
+                ce_codes = value
 
         # Build film analysis text
         film_analysis_text = ""
@@ -384,37 +407,43 @@ class CatalogDatabase:
             
             # Film format
             film_format = []
-            if "CE3.2.1" in ce_codes:  # Square Format
-                film_format.append("120-6x6")
-            elif "CE3.2.2" in ce_codes:  # Rectangular (3:2)
-                film_format.append("35mm")
-            elif "CE3.2.4" in ce_codes:  # Panoramic
-                film_format.append("120-6x9")
+            for code in ce_codes:
+                code_upper = code.upper()
+                if code_upper == "CE3.2.1":  # Square Format
+                    film_format.append("120-6x6")
+                elif code_upper == "CE3.2.2":  # Rectangular (3:2)
+                    film_format.append("35mm")
+                elif code_upper == "CE3.2.4":  # Panoramic
+                    film_format.append("120-6x9")
             
             if film_format:
                 film_analysis_text += f"Film Format: {', '.join(film_format)}\n"
             
             # Film characteristics
             film_chars = []
-            if "IC2.1.1" in ic_codes:  # Black & White
-                film_chars.append("black & white")
-            elif "IC2.1.3" in ic_codes:  # Color Image
-                film_chars.append("color")
-            
-            if "IC2.2.1" in ic_codes:  # High Contrast
-                film_chars.append("high contrast")
-            elif "IC2.2.3" in ic_codes:  # Low/Soft Contrast
-                film_chars.append("low contrast")
+            for code in ic_codes:
+                code_upper = code.upper()
+                if code_upper == "IC2.1.1":  # Black & White
+                    film_chars.append("black & white")
+                elif code_upper == "IC2.1.3":  # Color Image
+                    film_chars.append("color")
+                
+                if code_upper == "IC2.2.1":  # High Contrast
+                    film_chars.append("high contrast")
+                elif code_upper == "IC2.2.3":  # Low/Soft Contrast
+                    film_chars.append("low contrast")
             
             if film_chars:
                 film_analysis_text += f"Film Characteristics: {', '.join(film_chars)}\n"
             
             # Lens characteristics
             lens_chars = []
-            if "IC2.3.1" in ic_codes:  # All-in-focus/Deep Depth
-                lens_chars.append("deep depth of field")
-            elif "IC2.3.2" in ic_codes:  # Selective Focus/Shallow Depth
-                lens_chars.append("shallow depth of field")
+            for code in ic_codes:
+                code_upper = code.upper()
+                if code_upper == "IC2.3.1":  # All-in-focus/Deep Depth
+                    lens_chars.append("deep depth of field")
+                elif code_upper == "IC2.3.2":  # Selective Focus/Shallow Depth
+                    lens_chars.append("shallow depth of field")
             
             if lens_chars:
                 film_analysis_text += f"Lens Characteristics: {', '.join(lens_chars)}\n"
