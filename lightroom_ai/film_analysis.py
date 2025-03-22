@@ -56,6 +56,8 @@ Please follow these steps to complete your analysis:
    - Visual Subject (VS)
    - Image Characteristics (IC)
    - Contextual Elements (CE)
+   
+   IMPORTANT: You must provide at least one code for each of the three main categories (VS, IC, CE). If you're uncertain about which specific code to use within a category, choose the most general applicable code. For example, if you can't determine a specific Visual Subject subcategory, you can use a parent category like VS1, VS2, or VS3.
 
 5. **Present Your Analysis**  
    Structure your **final** output entirely in JSON with the following top-level keys:
@@ -162,9 +164,9 @@ Please follow these steps to complete your analysis:
        }
      },
      "taxonomy": {
-       "VS": ["List of relevant Visual Subject codes"],
-       "IC": ["List of relevant Image Characteristics codes"],
-       "CE": ["List of relevant Contextual Elements codes"]
+       "VS": ["List of relevant Visual Subject codes - at least one code required"],
+       "IC": ["List of relevant Image Characteristics codes - at least one code required"],
+       "CE": ["List of relevant Contextual Elements codes - at least one code required"]
      }
    }
    ```
@@ -182,6 +184,7 @@ Please follow these steps to complete your analysis:
    - **For the taxonomy**:
      1. List potential categories for each of VS, IC, and CE.
      2. Explain why each category might or might not apply based on what you observe in the image.
+     3. Remember that you must select at least one code for each main category (VS, IC, CE).
 
 ---
 
@@ -343,7 +346,7 @@ For FILM FORMAT analysis, consider:
 - If it's rectangular but wider than 35mm (6x4.5, 6x7, 6x9), select the appropriate 120 format.
 - Look for film border edges, sprocket holes, or frame numbers that might be visible.
 """
-    prompt += "\n---\n**Final Note**\nYour complete analysis must be presented as a **single JSON object** with three top-level keys: `detailed_evaluation`, `aesthetic_evaluation`, and `taxonomy`.\n"
+    prompt += "\n---\n**Final Note**\nYour complete analysis must be presented as a **single JSON object** with three top-level keys: `detailed_evaluation`, `aesthetic_evaluation`, and `taxonomy`. Remember that the taxonomy section must include at least one code for each of VS, IC, and CE categories.\n"
     
     return prompt
 
@@ -700,12 +703,24 @@ def validate_taxonomy_codes(analysis_result: Dict[str, Any]) -> Tuple[bool, Opti
     valid_codes = get_taxonomy_flat_list()
     taxonomy = analysis_result.get("taxonomy", {})
     
+    # Check that all three main categories are present
+    required_categories = {"VS", "IC", "CE"}
+    present_categories = {cat.upper() for cat in taxonomy.keys()}
+    
+    missing_categories = required_categories - present_categories
+    if missing_categories:
+        return False, f"Missing required taxonomy categories: {', '.join(missing_categories)}"
+    
     for category, codes in taxonomy.items():
         # Convert category to uppercase for case-insensitive comparison
         category_upper = category.upper()
         
         if category_upper not in valid_codes:
             return False, f"Invalid taxonomy category: {category}. Valid categories are: {', '.join(valid_codes.keys())}"
+        
+        # Check that each category has at least one code
+        if not codes:
+            return False, f"Taxonomy category {category} has no codes. At least one code is required."
         
         # Check that all codes in the category are valid
         for code in codes:
