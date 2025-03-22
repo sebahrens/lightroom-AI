@@ -28,5 +28,17 @@
   "categories": ["Composition", "Lighting", "Subject", "Technique", "Mood"],
   "use_llm_grouping": true,
   "use_llm_clustering": true,
-  "purge_unused_keywords": true
+  "purge_unused_keywords": true,
+  "keyword_categories": [
+    "Subject", 
+    "Location", 
+    "Technique", 
+    "Lighting", 
+    "Composition", 
+    "Color", 
+    "Mood", 
+    "Time", 
+    "Weather", 
+    "Event"
+  ]
 }
